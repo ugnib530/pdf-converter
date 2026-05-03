@@ -224,3 +224,224 @@ async def convert_to_excel(request: Request, file: UploadFile = File(...)):
         raise HTTPException(500, f"Conversion failed: {str(e)}")
     finally:
         pdf_path.unlink(missing_ok=True)
+
+
+# ─── Bank Statement Endpoint ─────────────────────────────────────────────────
+@app.post("/convert/bank-statement")
+@limiter.limit("5/minute")
+async def convert_bank_statement(request: Request, file: UploadFile = File(...)):
+    """Convert bank statement image or PDF → XLSX using Claude Haiku vision."""
+    import anthropic
+    import base64
+    import json
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured on server.")
+
+    content = await file.read()
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(413, f"File too large. Maximum is {MAX_FILE_SIZE_MB} MB.")
+
+    filename = file.filename.lower()
+    is_pdf = filename.endswith(".pdf") or file.content_type == "application/pdf"
+    is_image = any(filename.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"])
+
+    if not is_pdf and not is_image:
+        raise HTTPException(400, "Only PDF or image files (JPG, PNG, WEBP) are accepted.")
+
+    xlsx_path = temp_path("xlsx")
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        # Build message content for Claude
+        if is_pdf:
+            b64 = base64.standard_b64encode(content).decode("utf-8")
+            msg_content = [
+                {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
+                },
+                {"type": "text", "text": BANK_PROMPT},
+            ]
+        else:
+            b64 = base64.standard_b64encode(content).decode("utf-8")
+            # detect mime type
+            if filename.endswith(".png"):
+                mime = "image/png"
+            elif filename.endswith(".webp"):
+                mime = "image/webp"
+            elif filename.endswith(".gif"):
+                mime = "image/gif"
+            else:
+                mime = "image/jpeg"
+            msg_content = [
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": mime, "data": b64},
+                },
+                {"type": "text", "text": BANK_PROMPT},
+            ]
+
+        logger.info(f"Sending bank statement to Claude Haiku: {file.filename}")
+
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": msg_content}],
+        )
+
+        raw = response.content[0].text.strip()
+
+        # Strip markdown fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        data = json.loads(raw)
+        transactions = data.get("transactions", [])
+        bank_name = data.get("bank_name", "")
+        account_holder = data.get("account_holder", "")
+        account_number = data.get("account_number", "")
+        statement_period = data.get("statement_period", "")
+
+        if not transactions:
+            raise HTTPException(422, "No transactions found in the statement. Make sure the image is clear and contains transaction data.")
+
+        # ── Build Excel ──────────────────────────────────────────────────────
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Transactions"
+
+        # Styles
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill = PatternFill("solid", fgColor="1e40af")
+        alt_fill    = PatternFill("solid", fgColor="EFF6FF")
+        thin        = Side(style="thin", color="CBD5E1")
+        border      = Border(left=thin, right=thin, top=thin, bottom=thin)
+        center      = Alignment(horizontal="center", vertical="center")
+        left        = Alignment(horizontal="left",   vertical="center")
+
+        # ── Meta info rows ───────────────────────────────────────────────────
+        meta_font = Font(bold=True, size=11, color="1e40af")
+        meta_rows = [
+            ("Bank", bank_name),
+            ("Account Holder", account_holder),
+            ("Account Number", account_number),
+            ("Statement Period", statement_period),
+        ]
+        for i, (label, value) in enumerate(meta_rows, start=1):
+            ws.cell(row=i, column=1, value=label).font = meta_font
+            ws.cell(row=i, column=2, value=value)
+
+        # blank row
+        blank_row = len(meta_rows) + 2
+
+        # ── Headers ──────────────────────────────────────────────────────────
+        HEADERS = ["Date", "Description", "Type", "Debit (₹)", "Credit (₹)", "Balance (₹)", "Reference / ID", "Category"]
+        header_row = blank_row
+        for col, h in enumerate(HEADERS, start=1):
+            cell = ws.cell(row=header_row, column=col, value=h)
+            cell.font   = header_font
+            cell.fill   = header_fill
+            cell.border = border
+            cell.alignment = center
+        ws.row_dimensions[header_row].height = 22
+
+        # ── Data rows ────────────────────────────────────────────────────────
+        for idx, txn in enumerate(transactions, start=1):
+            row = header_row + idx
+            fill = alt_fill if idx % 2 == 0 else None
+            values = [
+                txn.get("date", ""),
+                txn.get("description", ""),
+                txn.get("type", ""),
+                txn.get("debit", ""),
+                txn.get("credit", ""),
+                txn.get("balance", ""),
+                txn.get("reference", ""),
+                txn.get("category", ""),
+            ]
+            for col, val in enumerate(values, start=1):
+                cell = ws.cell(row=row, column=col, value=val)
+                cell.border = border
+                cell.alignment = left
+                if fill:
+                    cell.fill = fill
+
+        # ── Summary rows ─────────────────────────────────────────────────────
+        last_data_row = header_row + len(transactions)
+        summary_row   = last_data_row + 2
+
+        total_debit  = sum(float(str(t.get("debit",  0) or 0).replace(",", "")) for t in transactions)
+        total_credit = sum(float(str(t.get("credit", 0) or 0).replace(",", "")) for t in transactions)
+
+        ws.cell(row=summary_row, column=3, value="TOTALS").font = Font(bold=True)
+        ws.cell(row=summary_row, column=4, value=round(total_debit,  2)).font = Font(bold=True, color="DC2626")
+        ws.cell(row=summary_row, column=5, value=round(total_credit, 2)).font = Font(bold=True, color="16A34A")
+
+        # ── Column widths ─────────────────────────────────────────────────────
+        col_widths = [14, 40, 12, 14, 14, 14, 20, 16]
+        for i, w in enumerate(col_widths, start=1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+        # freeze panes below header
+        ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
+
+        wb.save(str(xlsx_path))
+
+        stem = Path(file.filename).stem
+        return FileResponse(
+            path=str(xlsx_path),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=f"{stem}_transactions.xlsx",
+        )
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError:
+        logger.error("Claude returned non-JSON response")
+        raise HTTPException(500, "Could not parse AI response. Please try again with a clearer image.")
+    except Exception as e:
+        logger.error(f"Bank statement error: {e}")
+        raise HTTPException(500, f"Processing failed: {str(e)}")
+    finally:
+        xlsx_path.unlink(missing_ok=True)
+
+
+BANK_PROMPT = """You are a bank statement parser. Extract ALL transactions from this bank statement image/PDF.
+
+Return ONLY a valid JSON object with this exact structure, no markdown, no explanation:
+
+{
+  "bank_name": "name of the bank",
+  "account_holder": "account holder name",
+  "account_number": "account number (last 4 digits only for safety)",
+  "statement_period": "e.g. April 2025",
+  "transactions": [
+    {
+      "date": "DD/MM/YYYY",
+      "description": "full transaction description",
+      "type": "debit or credit",
+      "debit": 0.00,
+      "credit": 0.00,
+      "balance": 0.00,
+      "reference": "transaction ID or reference number if present",
+      "category": "e.g. Food, Transfer, Bill, Salary, ATM, Shopping, etc."
+    }
+  ]
+}
+
+Rules:
+- Extract every single transaction visible
+- For debit transactions: put amount in debit field, leave credit as 0
+- For credit transactions: put amount in credit field, leave debit as 0  
+- Use numbers only for amounts, no currency symbols
+- If a field is not visible, use empty string "" or 0
+- Categorize each transaction intelligently based on description
+- Return ONLY the JSON, nothing else"""
