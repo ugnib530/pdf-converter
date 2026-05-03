@@ -1,30 +1,19 @@
 import { useState, useRef, useCallback } from 'react'
 
-// ── Constants ────────────────────────────────────────────────────────────────
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const MAX_MB = 50
 
-// ── Icons (inline SVG) ───────────────────────────────────────────────────────
+// ── Icons ────────────────────────────────────────────────────────────────────
 const IconUpload = () => (
-  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
     <polyline points="17 8 12 3 7 8"/>
     <line x1="12" y1="3" x2="12" y2="15"/>
   </svg>
 )
 
-const IconPDF = () => (
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-    <polyline points="14 2 14 8 20 8"/>
-    <line x1="16" y1="13" x2="8" y2="13"/>
-    <line x1="16" y1="17" x2="8" y2="17"/>
-    <polyline points="10 9 9 9 8 9"/>
-  </svg>
-)
-
 const IconWord = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
     <polyline points="14 2 14 8 20 8"/>
     <path d="M9 13l1.5 4 1.5-4 1.5 4 1.5-4"/>
@@ -32,7 +21,7 @@ const IconWord = () => (
 )
 
 const IconExcel = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
     <polyline points="14 2 14 8 20 8"/>
     <line x1="8" y1="13" x2="16" y2="13"/>
@@ -43,138 +32,54 @@ const IconExcel = () => (
 )
 
 const IconCheck = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12"/>
   </svg>
 )
 
-const IconX = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="18" y1="6" x2="6" y2="18"/>
-    <line x1="6" y1="6" x2="18" y2="18"/>
-  </svg>
-)
-
-const IconArrow = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="5" y1="12" x2="19" y2="12"/>
-    <polyline points="12 5 19 12 12 19"/>
-  </svg>
-)
-
 const IconDownload = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
     <polyline points="7 10 12 15 17 10"/>
     <line x1="12" y1="15" x2="12" y2="3"/>
   </svg>
 )
 
+const IconX = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18"/>
+    <line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+)
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function formatSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// ── Sub-components ───────────────────────────────────────────────────────────
 function Spinner() {
   return (
-    <div style={{
-      width: 22, height: 22,
-      border: '2.5px solid rgba(255,255,255,0.15)',
-      borderTopColor: '#fff',
+    <span style={{
+      display: 'inline-block',
+      width: 16, height: 16,
+      border: '2px solid rgba(0,0,0,0.15)',
+      borderTopColor: '#111',
       borderRadius: '50%',
-      animation: 'spin 0.75s linear infinite',
+      animation: 'spin 0.7s linear infinite',
       flexShrink: 0,
     }} />
   )
 }
 
-function ProgressBar({ value }) {
-  return (
-    <div style={{
-      height: 4, background: 'var(--border)',
-      borderRadius: 2, overflow: 'hidden',
-      marginTop: 12,
-    }}>
-      <div style={{
-        height: '100%',
-        width: `${value}%`,
-        background: 'linear-gradient(90deg, var(--accent), #a78bfa)',
-        borderRadius: 2,
-        transition: 'width 0.3s ease',
-        backgroundSize: '400px 100%',
-        animation: value < 100 ? 'shimmer 1.5s infinite linear' : 'none',
-        backgroundImage: value < 100
-          ? 'linear-gradient(90deg, var(--accent) 0%, #a78bfa 50%, var(--accent) 100%)'
-          : 'linear-gradient(90deg, var(--accent), #a78bfa)',
-      }} />
-    </div>
-  )
-}
-
-function Badge({ children, color }) {
-  return (
-    <span style={{
-      display: 'inline-block',
-      padding: '2px 8px',
-      borderRadius: 4,
-      fontSize: 11,
-      fontFamily: 'var(--font-mono)',
-      fontWeight: 500,
-      letterSpacing: '0.05em',
-      background: color === 'green' ? 'rgba(22,163,74,0.15)' : 'rgba(239,68,68,0.15)',
-      color: color === 'green' ? '#4ade80' : '#f87171',
-      border: `1px solid ${color === 'green' ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.3)'}`,
-    }}>{children}</span>
-  )
-}
-
-function FeatureChip({ icon, text }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8,
-      padding: '8px 14px',
-      background: 'var(--surface2)',
-      border: '1px solid var(--border)',
-      borderRadius: 8,
-      fontSize: 13,
-      color: 'var(--muted)',
-      fontFamily: 'var(--font-mono)',
-    }}>
-      <span style={{ color: '#4ade80', fontSize: 15 }}>{icon}</span>
-      {text}
-    </div>
-  )
-}
-
-// ── Main App ─────────────────────────────────────────────────────────────────
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
   const [file, setFile] = useState(null)
   const [drag, setDrag] = useState(false)
-  const [converting, setConverting] = useState(null)   // 'word' | 'excel' | null
-  const [progress, setProgress] = useState(0)
-  const [result, setResult] = useState(null)           // { url, name, format }
+  const [converting, setConverting] = useState(null)
+  const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const inputRef = useRef(null)
-  const progressRef = useRef(null)
-
-  // Fake smooth progress animation
-  const startFakeProgress = useCallback(() => {
-    setProgress(0)
-    let p = 0
-    progressRef.current = setInterval(() => {
-      p += Math.random() * 8
-      if (p >= 90) { clearInterval(progressRef.current); p = 90 }
-      setProgress(Math.round(p))
-    }, 300)
-  }, [])
-
-  const stopProgress = useCallback((success) => {
-    clearInterval(progressRef.current)
-    setProgress(success ? 100 : 0)
-  }, [])
 
   const handleFile = useCallback((f) => {
     setError(null)
@@ -185,15 +90,15 @@ export default function App() {
       return
     }
     if (f.size > MAX_MB * 1024 * 1024) {
-      setError(`File is too large. Maximum size is ${MAX_MB} MB.`)
+      setError(`File too large. Maximum is ${MAX_MB} MB.`)
       return
     }
     setFile(f)
   }, [])
 
-  const onInputChange = (e) => handleFile(e.target.files?.[0])
   const onDrop = (e) => {
-    e.preventDefault(); setDrag(false)
+    e.preventDefault()
+    setDrag(false)
     handleFile(e.dataTransfer.files?.[0])
   }
 
@@ -202,33 +107,26 @@ export default function App() {
     setError(null)
     setResult(null)
     setConverting(format)
-    startFakeProgress()
 
     try {
       const body = new FormData()
       body.append('file', file)
-
       const endpoint = format === 'word' ? '/convert/word' : '/convert/excel'
-      const url = `${API_BASE}${endpoint}`
-
-      const res = await fetch(url, { method: 'POST', body })
+      const res = await fetch(`${API_BASE}${endpoint}`, { method: 'POST', body })
 
       if (!res.ok) {
-        let msg = `Server error (${res.status})`
+        let msg = `Error ${res.status}`
         try { const j = await res.json(); msg = j.detail || msg } catch {}
-        if (res.status === 429) msg = 'Rate limit reached. Please wait a minute and try again.'
+        if (res.status === 429) msg = 'Rate limit reached. Please wait a minute.'
         throw new Error(msg)
       }
 
       const blob = await res.blob()
-      const objUrl = URL.createObjectURL(blob)
+      const url = URL.createObjectURL(blob)
       const stem = file.name.replace(/\.pdf$/i, '')
       const ext = format === 'word' ? 'docx' : 'xlsx'
-
-      stopProgress(true)
-      setResult({ url: objUrl, name: `${stem}.${ext}`, format })
+      setResult({ url, name: `${stem}.${ext}`, format })
     } catch (err) {
-      stopProgress(false)
       setError(err.message || 'Conversion failed. Please try again.')
     } finally {
       setConverting(null)
@@ -236,11 +134,11 @@ export default function App() {
   }
 
   const reset = () => {
-    setFile(null); setResult(null); setError(null); setProgress(0)
+    setFile(null); setResult(null); setError(null)
     if (inputRef.current) inputRef.current.value = ''
   }
 
-  const downloadResult = () => {
+  const download = () => {
     if (!result) return
     const a = document.createElement('a')
     a.href = result.url
@@ -250,180 +148,320 @@ export default function App() {
 
   const isConverting = converting !== null
 
+  // ── Styles (inline, flat) ─────────────────────────────────────────────────
+  const s = {
+    header: {
+      borderBottom: '1px solid #e0e0e0',
+      padding: '0 40px',
+      height: 56,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      background: '#fff',
+    },
+    logo: {
+      fontFamily: 'Syne, sans-serif',
+      fontWeight: 800,
+      fontSize: 20,
+      letterSpacing: '-0.02em',
+      color: '#111',
+    },
+    logoSpan: {
+      background: '#f5c400',
+      padding: '2px 6px',
+      marginLeft: 2,
+    },
+    nav: {
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 12,
+      color: '#888',
+    },
+    main: {
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      padding: '64px 24px 80px',
+      background: '#fff',
+    },
+    hero: {
+      textAlign: 'center',
+      maxWidth: 520,
+      marginBottom: 48,
+    },
+    h1: {
+      fontFamily: 'Syne, sans-serif',
+      fontWeight: 800,
+      fontSize: 'clamp(32px, 5vw, 52px)',
+      lineHeight: 1.1,
+      letterSpacing: '-0.03em',
+      color: '#111',
+      marginBottom: 16,
+    },
+    subtitle: {
+      fontSize: 15,
+      color: '#777',
+      lineHeight: 1.6,
+    },
+    card: {
+      width: '100%',
+      maxWidth: 520,
+      border: '1px solid #e0e0e0',
+      background: '#fff',
+    },
+    dropzone: (active, hasFile) => ({
+      padding: '48px 32px',
+      borderBottom: '1px solid #e0e0e0',
+      textAlign: 'center',
+      cursor: isConverting ? 'not-allowed' : 'pointer',
+      background: active ? '#fffbea' : '#fafafa',
+      transition: 'background 0.15s',
+      outline: active ? '2px solid #f5c400' : 'none',
+      outlineOffset: -2,
+    }),
+    dropIcon: {
+      color: '#aaa',
+      marginBottom: 16,
+      display: 'flex',
+      justifyContent: 'center',
+    },
+    dropTitle: {
+      fontWeight: 600,
+      fontSize: 15,
+      color: '#111',
+      marginBottom: 6,
+    },
+    dropSub: {
+      fontSize: 13,
+      color: '#999',
+    },
+    fileRow: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    fileName: {
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 13,
+      color: '#111',
+      wordBreak: 'break-all',
+      textAlign: 'left',
+    },
+    fileSize: {
+      fontFamily: 'JetBrains Mono, monospace',
+      fontSize: 11,
+      color: '#999',
+      marginTop: 4,
+    },
+    removeBtn: {
+      background: 'none',
+      border: '1px solid #e0e0e0',
+      padding: '5px 10px',
+      cursor: 'pointer',
+      color: '#888',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 4,
+      fontSize: 12,
+      flexShrink: 0,
+      fontFamily: 'Inter, sans-serif',
+    },
+    actions: {
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+    },
+    actionBtn: (fmt, disabled) => ({
+      padding: '20px 24px',
+      border: 'none',
+      borderRight: fmt === 'word' ? '1px solid #e0e0e0' : 'none',
+      background: disabled ? '#fafafa' : converting === fmt ? '#f5c400' : '#fff',
+      cursor: disabled ? 'not-allowed' : 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      fontFamily: 'Inter, sans-serif',
+      fontWeight: 600,
+      fontSize: 14,
+      color: disabled ? '#bbb' : converting === fmt ? '#111' : '#111',
+      transition: 'background 0.15s',
+      textAlign: 'left',
+    }),
+    errorBox: {
+      padding: '14px 20px',
+      background: '#fff5f5',
+      borderTop: '1px solid #ffd0d0',
+      fontSize: 13,
+      color: '#cc2222',
+      fontFamily: 'JetBrains Mono, monospace',
+    },
+    resultArea: {
+      padding: '32px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 16,
+    },
+    successRow: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+    },
+    checkCircle: {
+      width: 36,
+      height: 36,
+      background: '#f5c400',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    successLabel: {
+      fontWeight: 600,
+      fontSize: 15,
+      color: '#111',
+    },
+    successSub: {
+      fontSize: 13,
+      color: '#888',
+      marginTop: 2,
+    },
+    downloadBtn: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      padding: '14px',
+      background: '#111',
+      color: '#fff',
+      border: 'none',
+      cursor: 'pointer',
+      fontWeight: 600,
+      fontSize: 14,
+      fontFamily: 'Inter, sans-serif',
+      width: '100%',
+    },
+    resetBtn: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '12px',
+      background: 'none',
+      color: '#888',
+      border: '1px solid #e0e0e0',
+      cursor: 'pointer',
+      fontSize: 13,
+      fontFamily: 'Inter, sans-serif',
+      width: '100%',
+    },
+    infoGrid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+      gap: 0,
+      border: '1px solid #e0e0e0',
+      marginTop: 40,
+      width: '100%',
+      maxWidth: 520,
+    },
+    infoCell: (last) => ({
+      padding: '20px 24px',
+      borderRight: last ? 'none' : '1px solid #e0e0e0',
+    }),
+    infoDot: (color) => ({
+      width: 8,
+      height: 8,
+      background: color,
+      marginBottom: 12,
+    }),
+    infoTitle: {
+      fontFamily: 'Syne, sans-serif',
+      fontWeight: 700,
+      fontSize: 13,
+      color: '#111',
+      marginBottom: 6,
+    },
+    infoDesc: {
+      fontSize: 12,
+      color: '#888',
+      lineHeight: 1.6,
+    },
+    footer: {
+      borderTop: '1px solid #e0e0e0',
+      padding: '18px 40px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      background: '#fff',
+    },
+    footerText: {
+      fontSize: 12,
+      color: '#aaa',
+      fontFamily: 'JetBrains Mono, monospace',
+    },
+  }
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-
-      {/* ── Glow orbs ── */}
-      <div style={{
-        position: 'fixed', top: -200, left: '20%',
-        width: 500, height: 500, borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(91,108,255,0.12) 0%, transparent 70%)',
-        pointerEvents: 'none', zIndex: 0,
-      }} />
-      <div style={{
-        position: 'fixed', bottom: -100, right: '10%',
-        width: 400, height: 400, borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(124,58,237,0.1) 0%, transparent 70%)',
-        pointerEvents: 'none', zIndex: 0,
-      }} />
-
-      {/* ── Header ── */}
-      <header style={{
-        position: 'relative', zIndex: 2,
-        borderBottom: '1px solid var(--border)',
-        padding: '18px 40px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'rgba(12,12,15,0.8)',
-        backdropFilter: 'blur(12px)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'linear-gradient(135deg, var(--accent), var(--accent2))',
-            display: 'grid', placeItems: 'center', fontSize: 16,
-          }}>⟁</div>
-          <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: 20, letterSpacing: '-0.02em' }}>
-            Doc<span style={{ color: 'var(--accent)' }}>Shift</span>
-          </span>
+    <>
+      {/* Header */}
+      <header style={s.header}>
+        <div style={s.logo}>
+          Doc<span style={s.logoSpan}>Shift</span>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Badge color="green">FREE</Badge>
-          <Badge color="green">NO SIGNUP</Badge>
-        </div>
+        <span style={s.nav}>PDF Converter</span>
       </header>
 
-      {/* ── Main ── */}
-      <main style={{
-        flex: 1, position: 'relative', zIndex: 2,
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-        padding: '60px 24px 80px',
-        animation: 'fadeUp 0.5s ease forwards',
-      }}>
-
-        {/* Hero text */}
-        <div style={{ textAlign: 'center', marginBottom: 48, maxWidth: 600 }}>
-          <p style={{
-            fontFamily: 'var(--font-mono)', fontSize: 12,
-            color: 'var(--accent)', letterSpacing: '0.15em',
-            textTransform: 'uppercase', marginBottom: 16,
-          }}>
-            PDF Converter — 100% Free · No Limits
-          </p>
-          <h1 style={{
-            fontFamily: 'var(--font-head)', fontWeight: 800,
-            fontSize: 'clamp(36px, 6vw, 64px)',
-            lineHeight: 1.05, letterSpacing: '-0.03em',
-            marginBottom: 18,
-          }}>
-            Convert PDFs to<br />
-            <span style={{
-              background: 'linear-gradient(90deg, #5b6cff, #a78bfa)',
-              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-            }}>Word & Excel</span>
+      {/* Main */}
+      <main style={s.main}>
+        {/* Hero */}
+        <div style={s.hero}>
+          <h1 style={s.h1}>
+            PDF to Word<br />& Excel
           </h1>
-          <p style={{ color: 'var(--muted)', fontSize: 16, lineHeight: 1.6 }}>
-            No cloud storage. Files are processed on the server and deleted instantly.
-            Nothing is ever saved.
+          <p style={s.subtitle}>
+            Upload a PDF, choose a format, download your file.<br />
+            No sign-up. Files are deleted after conversion.
           </p>
         </div>
 
-        {/* Feature chips */}
-        <div style={{
-          display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center',
-          marginBottom: 48,
-        }}>
-          <FeatureChip icon="🔒" text="No storage" />
-          <FeatureChip icon="⚡" text="Instant" />
-          <FeatureChip icon="🚫" text="No watermarks" />
-          <FeatureChip icon="📦" text="Up to 50 MB" />
-        </div>
-
-        {/* ── Card ── */}
-        <div style={{
-          width: '100%', maxWidth: 560,
-          background: 'var(--surface)',
-          border: '1px solid var(--border)',
-          borderRadius: 20,
-          padding: 32,
-          boxShadow: '0 24px 80px rgba(0,0,0,0.4)',
-        }}>
+        {/* Card */}
+        <div style={s.card}>
 
           {!result ? (
             <>
-              {/* Drop zone */}
+              {/* Dropzone */}
               <div
+                style={s.dropzone(drag, !!file)}
                 onClick={() => !isConverting && inputRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
                 onDragLeave={() => setDrag(false)}
                 onDrop={onDrop}
-                style={{
-                  border: `2px dashed ${drag ? 'var(--accent)' : file ? 'var(--border2)' : 'var(--border)'}`,
-                  borderRadius: 14,
-                  padding: '36px 24px',
-                  textAlign: 'center',
-                  cursor: isConverting ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.2s',
-                  background: drag ? 'rgba(91,108,255,0.05)' : 'var(--surface2)',
-                  position: 'relative',
-                  overflow: 'hidden',
-                }}>
-
+              >
                 {file ? (
-                  /* File selected state */
-                  <div style={{ animation: 'slideIn 0.25s ease' }}>
-                    <div style={{
-                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                      width: 52, height: 52, borderRadius: 12,
-                      background: 'rgba(239,68,68,0.12)',
-                      color: '#f87171', marginBottom: 14,
-                    }}>
-                      <IconPDF />
-                    </div>
-                    <div style={{
-                      fontFamily: 'var(--font-mono)', fontSize: 13,
-                      color: 'var(--text)', marginBottom: 6,
-                      wordBreak: 'break-all',
-                    }}>
-                      {file.name}
-                    </div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--muted)' }}>
-                      {formatSize(file.size)}
+                  <div style={s.fileRow}>
+                    <div>
+                      <div style={s.fileName}>{file.name}</div>
+                      <div style={s.fileSize}>{formatSize(file.size)}</div>
                     </div>
                     {!isConverting && (
                       <button
+                        style={s.removeBtn}
                         onClick={(e) => { e.stopPropagation(); reset() }}
-                        style={{
-                          marginTop: 12,
-                          background: 'none', border: '1px solid var(--border)',
-                          color: 'var(--muted)', cursor: 'pointer',
-                          borderRadius: 6, padding: '4px 12px', fontSize: 12,
-                          fontFamily: 'var(--font-mono)',
-                          display: 'inline-flex', alignItems: 'center', gap: 4,
-                        }}>
+                      >
                         <IconX /> Remove
                       </button>
                     )}
                   </div>
                 ) : (
-                  /* Empty state */
                   <>
-                    <div style={{ color: 'var(--muted)', marginBottom: 14 }}>
-                      <IconUpload />
-                    </div>
-                    <p style={{ fontWeight: 600, marginBottom: 6 }}>
-                      Drop your PDF here
-                    </p>
-                    <p style={{ color: 'var(--muted)', fontSize: 13 }}>
-                      or click to browse — PDF up to {MAX_MB} MB
-                    </p>
+                    <div style={s.dropIcon}><IconUpload /></div>
+                    <div style={s.dropTitle}>Drop your PDF here</div>
+                    <div style={s.dropSub}>or click to browse — max {MAX_MB} MB</div>
                   </>
                 )}
-
                 <input
                   ref={inputRef}
                   type="file"
                   accept=".pdf,application/pdf"
-                  onChange={onInputChange}
+                  onChange={(e) => handleFile(e.target.files?.[0])}
                   style={{ display: 'none' }}
                   disabled={isConverting}
                 />
@@ -431,251 +469,73 @@ export default function App() {
 
               {/* Error */}
               {error && (
-                <div style={{
-                  marginTop: 14,
-                  padding: '12px 16px',
-                  background: 'rgba(239,68,68,0.08)',
-                  border: '1px solid rgba(239,68,68,0.25)',
-                  borderRadius: 10,
-                  color: '#f87171',
-                  fontSize: 13,
-                  fontFamily: 'var(--font-mono)',
-                  animation: 'slideIn 0.2s ease',
-                }}>
-                  ⚠ {error}
-                </div>
+                <div style={s.errorBox}>⚠ {error}</div>
               )}
 
-              {/* Progress */}
-              {isConverting && <ProgressBar value={progress} />}
-
               {/* Action buttons */}
-              <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
-                marginTop: 20,
-              }}>
+              <div style={s.actions}>
                 {[
-                  {
-                    fmt: 'word',
-                    label: 'Convert to Word',
-                    Icon: IconWord,
-                    color: 'var(--word)',
-                    glow: 'var(--word-glow)',
-                    ext: '.DOCX',
-                  },
-                  {
-                    fmt: 'excel',
-                    label: 'Convert to Excel',
-                    Icon: IconExcel,
-                    color: 'var(--excel)',
-                    glow: 'var(--excel-glow)',
-                    ext: '.XLSX',
-                  },
-                ].map(({ fmt, label, Icon, color, glow, ext }) => {
-                  const active = converting === fmt
+                  { fmt: 'word', label: 'Convert to Word', Icon: IconWord },
+                  { fmt: 'excel', label: 'Convert to Excel', Icon: IconExcel },
+                ].map(({ fmt, label, Icon }) => {
                   const disabled = !file || isConverting
+                  const active = converting === fmt
                   return (
                     <button
                       key={fmt}
+                      style={s.actionBtn(fmt, disabled)}
                       onClick={() => convert(fmt)}
                       disabled={disabled}
-                      style={{
-                        display: 'flex', flexDirection: 'column',
-                        alignItems: 'flex-start',
-                        gap: 8,
-                        padding: '16px 18px',
-                        background: disabled
-                          ? 'var(--surface2)'
-                          : active
-                            ? color
-                            : `${color}18`,
-                        border: `1px solid ${disabled ? 'var(--border)' : color}`,
-                        borderRadius: 12,
-                        color: disabled ? 'var(--muted)' : active ? '#fff' : color,
-                        cursor: disabled ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.2s',
-                        fontFamily: 'var(--font-body)',
-                        boxShadow: active ? `0 0 20px ${glow}` : 'none',
-                        textAlign: 'left',
-                      }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        {active ? <Spinner /> : <Icon />}
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, opacity: 0.7 }}>{ext}</span>
-                      </div>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>
-                        {active ? 'Converting…' : label}
-                      </span>
+                      {active ? <Spinner /> : <Icon />}
+                      {active ? 'Converting…' : label}
                     </button>
                   )
                 })}
               </div>
-
-              {isConverting && (
-                <p style={{
-                  textAlign: 'center', marginTop: 14,
-                  fontSize: 12, fontFamily: 'var(--font-mono)',
-                  color: 'var(--muted)',
-                }}>
-                  This may take 10–60 seconds for large files…
-                </p>
-              )}
             </>
           ) : (
-            /* ── Result card ── */
-            <div style={{ textAlign: 'center', animation: 'fadeUp 0.35s ease' }}>
-              <div style={{
-                position: 'relative', display: 'inline-flex',
-                alignItems: 'center', justifyContent: 'center',
-                width: 72, height: 72, borderRadius: '50%',
-                background: 'rgba(74,222,128,0.12)',
-                color: '#4ade80', marginBottom: 20,
-              }}>
-                <IconCheck />
-                <div style={{
-                  position: 'absolute', inset: 0, borderRadius: '50%',
-                  border: '2px solid rgba(74,222,128,0.4)',
-                  animation: 'pulse-ring 1.5s ease-out infinite',
-                }} />
-              </div>
-
-              <h2 style={{
-                fontFamily: 'var(--font-head)', fontWeight: 700,
-                fontSize: 24, marginBottom: 8,
-              }}>
-                Conversion Complete
-              </h2>
-              <p style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 24 }}>
-                Your file is ready to download.
-              </p>
-
-              <div style={{
-                background: 'var(--surface2)',
-                border: '1px solid var(--border)',
-                borderRadius: 10, padding: '14px 18px',
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                marginBottom: 20, textAlign: 'left',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {result.format === 'word' ? <IconWord /> : <IconExcel />}
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, wordBreak: 'break-all' }}>
-                    {result.name}
-                  </span>
+            /* Result */
+            <div style={s.resultArea}>
+              <div style={s.successRow}>
+                <div style={s.checkCircle}><IconCheck /></div>
+                <div>
+                  <div style={s.successLabel}>Conversion complete</div>
+                  <div style={s.successSub}>{result.name}</div>
                 </div>
-                <IconArrow />
               </div>
-
-              <button
-                onClick={downloadResult}
-                style={{
-                  width: '100%', padding: '14px',
-                  background: result.format === 'word' ? 'var(--word)' : 'var(--excel)',
-                  border: 'none', borderRadius: 12,
-                  color: '#fff', fontWeight: 600, fontSize: 16,
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                  marginBottom: 14,
-                  boxShadow: result.format === 'word'
-                    ? '0 0 24px var(--word-glow)'
-                    : '0 0 24px var(--excel-glow)',
-                  fontFamily: 'var(--font-body)',
-                }}>
-                <IconDownload /> Download {result.format === 'word' ? 'Word' : 'Excel'} File
+              <button style={s.downloadBtn} onClick={download}>
+                <IconDownload />
+                Download {result.format === 'word' ? 'Word' : 'Excel'} file
               </button>
-
-              <button
-                onClick={reset}
-                style={{
-                  width: '100%', padding: '12px',
-                  background: 'none',
-                  border: '1px solid var(--border)',
-                  borderRadius: 12, color: 'var(--muted)',
-                  cursor: 'pointer', fontSize: 14,
-                  fontFamily: 'var(--font-body)',
-                }}>
+              <button style={s.resetBtn} onClick={reset}>
                 Convert another file
               </button>
             </div>
           )}
         </div>
 
-        {/* ── Info section ── */}
-        <div style={{
-          marginTop: 64, width: '100%', maxWidth: 800,
-        }}>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 16,
-          }}>
-            {[
-              {
-                title: 'PDF → Word',
-                desc: 'Preserves text, headings, and layout. Best for text-heavy documents and reports.',
-                color: 'var(--word)',
-              },
-              {
-                title: 'PDF → Excel',
-                desc: 'Extracts tables and structured data from your PDF into formatted spreadsheet sheets.',
-                color: 'var(--excel)',
-              },
-              {
-                title: 'Privacy First',
-                desc: 'Files are processed in memory and deleted from the server within 5 minutes.',
-                color: 'var(--accent)',
-              },
-            ].map(({ title, desc, color }) => (
-              <div key={title} style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 14,
-                padding: 22,
-              }}>
-                <div style={{
-                  width: 4, height: 18, borderRadius: 2,
-                  background: color, marginBottom: 12,
-                }} />
-                <h3 style={{
-                  fontFamily: 'var(--font-head)', fontWeight: 700,
-                  fontSize: 16, marginBottom: 8,
-                }}>{title}</h3>
-                <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6 }}>{desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Limitations note */}
-        <div style={{
-          marginTop: 40, maxWidth: 560,
-          padding: '16px 20px',
-          background: 'rgba(91,108,255,0.06)',
-          border: '1px solid rgba(91,108,255,0.2)',
-          borderRadius: 12,
-          fontSize: 13, color: 'var(--muted)', lineHeight: 1.7,
-        }}>
-          <strong style={{ color: 'var(--text)', fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.05em' }}>
-            NOTES
-          </strong><br />
-          • Scanned/image PDFs require OCR and may not convert accurately with the free engine.<br />
-          • Complex layouts (multi-column, graphics) may need manual cleanup in Word.<br />
-          • Excel extraction works best with clearly formatted tables.
+        {/* Info strip */}
+        <div style={s.infoGrid}>
+          {[
+            { label: 'PDF → Word', desc: 'Text, headings, and layout preserved. Best for reports and documents.', color: '#f5c400', last: false },
+            { label: 'PDF → Excel', desc: 'Extracts tables and structured data into spreadsheet sheets.', color: '#111', last: false },
+            { label: 'No storage', desc: 'Files are processed on the server and deleted immediately.', color: '#e0e0e0', last: true },
+          ].map(({ label, desc, color, last }) => (
+            <div key={label} style={s.infoCell(last)}>
+              <div style={s.infoDot(color)} />
+              <div style={s.infoTitle}>{label}</div>
+              <div style={s.infoDesc}>{desc}</div>
+            </div>
+          ))}
         </div>
       </main>
 
-      {/* ── Footer ── */}
-      <footer style={{
-        position: 'relative', zIndex: 2,
-        borderTop: '1px solid var(--border)',
-        padding: '20px 40px',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(12,12,15,0.6)',
-        backdropFilter: 'blur(8px)',
-      }}>
-        <p style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--font-mono)' }}>
-          DocShift — Free & open source. Built with FastAPI + React.
-        </p>
+      {/* Footer */}
+      <footer style={s.footer}>
+        <span style={s.footerText}>DocShift</span>
+        <span style={s.footerText}>PDF to Word & Excel</span>
       </footer>
-
-    </div>
+    </>
   )
 }
