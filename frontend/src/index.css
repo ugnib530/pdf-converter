@@ -1,21 +1,16 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #0c0c0f;
-  --surface:   #141418;
-  --surface2:  #1c1c22;
-  --border:    #2a2a35;
-  --border2:   #3a3a48;
-  --text:      #e8e8f0;
-  --muted:     #7a7a90;
-  --accent:    #5b6cff;
-  --accent2:   #7c3aed;
-  --word:      #2563eb;
-  --word-glow: rgba(37,99,235,0.25);
-  --excel:     #16a34a;
-  --excel-glow:rgba(22,163,74,0.25);
-  --danger:    #ef4444;
-  --radius:    12px;
+  --bg:       #ffffff;
+  --surface:  #f7f7f7;
+  --border:   #e0e0e0;
+  --text:     #111111;
+  --muted:    #888888;
+  --yellow:   #f5c400;
+  --yellow-dk:#d4a900;
+  --word:     #1a56db;
+  --excel:    #1a7f3c;
+  --danger:   #cc2222;
   --font-head: 'Syne', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   --font-body: 'Inter', sans-serif;
@@ -29,47 +24,8 @@ body {
   font-family: var(--font-body);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
 }
 
-/* ── Grid background ── */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(var(--border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 60px 60px;
-  opacity: 0.3;
-  pointer-events: none;
-  z-index: 0;
-}
+#root { min-height: 100vh; display: flex; flex-direction: column; }
 
-#root { position: relative; z-index: 1; }
-
-/* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
-
-/* ── Animations ── */
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(24px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes pulse-ring {
-  0%   { transform: scale(1);    opacity: 0.6; }
-  100% { transform: scale(1.6);  opacity: 0; }
-}
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-@keyframes shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position:  400px 0; }
-}
-@keyframes slideIn {
-  from { opacity: 0; transform: translateX(-12px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
