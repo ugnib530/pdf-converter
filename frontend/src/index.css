@@ -1,31 +1,15 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-:root {
-  --bg:       #ffffff;
-  --surface:  #f7f7f7;
-  --border:   #e0e0e0;
-  --text:     #111111;
-  --muted:    #888888;
-  --yellow:   #f5c400;
-  --yellow-dk:#d4a900;
-  --word:     #1a56db;
-  --excel:    #1a7f3c;
-  --danger:   #cc2222;
-  --font-head: 'Syne', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
-  --font-body: 'Inter', sans-serif;
-}
-
 html { font-size: 16px; scroll-behavior: smooth; }
 
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-body);
+  background: #fff;
+  color: #111;
+  font-family: 'Inter', sans-serif;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
 
-#root { min-height: 100vh; display: flex; flex-direction: column; }
+#root { min-height: 100vh; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
