@@ -38,6 +38,14 @@ const IconBank = () => (
     <line x1="17" y1="14" x2="17" y2="18"/>
   </svg>
 )
+const IconUPI = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="5" width="20" height="14" rx="2"/>
+    <path d="M2 10h20"/>
+    <path d="M7 15h2"/>
+    <path d="M12 15h5"/>
+  </svg>
+)
 const IconCheck = () => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12"/>
@@ -313,19 +321,15 @@ function BankStatement() {
 
   return (
     <>
-      {/* AI badge */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#eff4ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '8px 14px', marginBottom: 20 }}>
         <span style={{ color: '#2563eb' }}><IconAI /></span>
         <span style={{ fontSize: 13, color: '#1e40af', fontWeight: 600, fontFamily: 'var(--font)' }}>Powered by Claude AI — reads any bank, any format</span>
       </div>
-
       <DropZone
         file={file} onFile={handleFile} onReset={reset} isConverting={converting}
         accept={['.pdf', '.jpg', '.jpeg', '.png', '.webp']}
         acceptLabel="PDF or Image (JPG, PNG)"
       />
-
-      {/* What gets extracted */}
       {!file && !converting && (
         <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {['📅 Date', '💰 Amount', '📝 Description', '🏷️ Category', '⚖️ Balance', '🔖 Reference ID'].map(tag => (
@@ -333,7 +337,6 @@ function BankStatement() {
           ))}
         </div>
       )}
-
       {error && <div style={{ marginTop: 14, padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#dc2626', fontSize: 13 }}>⚠ {error}</div>}
       {converting && (
         <>
@@ -343,7 +346,6 @@ function BankStatement() {
           </p>
         </>
       )}
-
       <button onClick={convert} disabled={!file || converting} style={{
         width: '100%', marginTop: 20, padding: '15px',
         background: !file || converting ? '#f7f8fc' : 'linear-gradient(135deg, #7c3aed, #2563eb)',
@@ -356,9 +358,135 @@ function BankStatement() {
       }}>
         {converting ? <><Spinner color="#7c3aed" /> Extracting transactions…</> : <><IconAI /> Extract to Excel</>}
       </button>
-
       <p style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: '#6b7394' }}>
         Works with SBI, HDFC, ICICI, Axis, Kotak and all major Indian banks
+      </p>
+    </>
+  )
+}
+
+// ── UPI Tracker Tab ───────────────────────────────────────────────────────────
+function UPITracker() {
+  const [file, setFile] = useState(null)
+  const [converting, setConverting] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [result, setResult] = useState(null)
+  const [error, setError] = useState(null)
+  const progressRef = useRef(null)
+
+  const startProgress = () => {
+    setProgress(0); let p = 0
+    progressRef.current = setInterval(() => {
+      p += Math.random() * 4
+      if (p >= 80) { clearInterval(progressRef.current); p = 80 }
+      setProgress(Math.round(p))
+    }, 500)
+  }
+  const stopProgress = (ok) => { clearInterval(progressRef.current); setProgress(ok ? 100 : 0) }
+  const handleFile = (f, err) => { setError(err); setResult(null); setFile(f) }
+  const reset = () => { setFile(null); setResult(null); setError(null); setProgress(0) }
+
+  const convert = async () => {
+    if (!file || converting) return
+    setError(null); setResult(null); setConverting(true); startProgress()
+    try {
+      const body = new FormData(); body.append('file', file)
+      const res = await fetch(`${API_BASE}/convert/upi-tracker`, { method: 'POST', body })
+      if (!res.ok) {
+        let m = `Error ${res.status}`
+        try { const j = await res.json(); m = j.detail || m } catch {}
+        throw new Error(m)
+      }
+      const blob = await res.blob()
+      stopProgress(true)
+      setResult({
+        url: URL.createObjectURL(blob),
+        name: `${file.name.replace(/\.pdf$/i, '')}_upi_spending.xlsx`
+      })
+    } catch (e) { stopProgress(false); setError(e.message) } finally { setConverting(false) }
+  }
+
+  if (result) return (
+    <div style={{ textAlign: 'center', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ display: 'inline-flex', width: 72, height: 72, borderRadius: '50%', background: '#fff7ed', color: '#ea580c', alignItems: 'center', justifyContent: 'center', marginBottom: 20, position: 'relative' }}>
+        <IconCheck />
+        <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '2px solid #fdba74', animation: 'pulse-ring 1.5s ease-out infinite' }} />
+      </div>
+      <h2 style={{ fontFamily: 'var(--font)', fontWeight: 800, fontSize: 22, marginBottom: 6 }}>UPI Report Ready!</h2>
+      <p style={{ color: '#6b7394', fontSize: 14, marginBottom: 8 }}>All your UPI spending, sorted by category</p>
+      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, padding: '10px 16px', marginBottom: 20, fontSize: 13, color: '#9a3412' }}>
+        🍔 Food · 🚗 Transport · 🛍️ Shopping · 📱 Subscriptions · and more — all categorized
+      </div>
+      <button
+        onClick={() => { const a = document.createElement('a'); a.href = result.url; a.download = result.name; a.click() }}
+        style={{ width: '100%', padding: '14px', background: 'linear-gradient(135deg, #ea580c, #d97706)', border: 'none', borderRadius: 12, color: '#fff', fontWeight: 700, fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 12, fontFamily: 'var(--font)' }}>
+        <IconDownload /> Download UPI Spending Report
+      </button>
+      <button onClick={reset} style={{ width: '100%', padding: '12px', background: 'none', border: '1.5px solid #e2e5f0', borderRadius: 12, color: '#3d4663', cursor: 'pointer', fontSize: 14, fontFamily: 'var(--font)', fontWeight: 600 }}>
+        Analyse another statement
+      </button>
+    </div>
+  )
+
+  return (
+    <>
+      {/* AI badge */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '8px 14px', marginBottom: 20 }}>
+        <span style={{ color: '#ea580c' }}><IconAI /></span>
+        <span style={{ fontSize: 13, color: '#9a3412', fontWeight: 600, fontFamily: 'var(--font)' }}>AI reads your statement — extracts only outgoing UPI payments</span>
+      </div>
+
+      <DropZone
+        file={file} onFile={handleFile} onReset={reset} isConverting={converting}
+        accept={['.pdf']}
+        acceptLabel="PDF only"
+      />
+
+      {/* Category chips */}
+      {!file && !converting && (
+        <div style={{ marginTop: 16 }}>
+          <p style={{ fontSize: 12, color: '#6b7394', marginBottom: 8 }}>Automatically groups your spending into:</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {['🍔 Food', '🚗 Transport', '🛍️ Shopping', '🎬 Entertainment', '📱 Subscriptions', '💊 Medicine', '🛒 Groceries', '💡 Utilities'].map(tag => (
+              <span key={tag} style={{ fontSize: 12, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, padding: '4px 10px', color: '#9a3412', fontWeight: 500 }}>{tag}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div style={{ marginTop: 14, padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, color: '#dc2626', fontSize: 13 }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {converting && (
+        <>
+          <ProgressBar value={progress} color="#ea580c" />
+          <p style={{ textAlign: 'center', marginTop: 10, fontSize: 12, color: '#6b7394' }}>
+            AI is scanning UPI transactions and categorizing them… 20–50 seconds
+          </p>
+        </>
+      )}
+
+      <button onClick={convert} disabled={!file || converting} style={{
+        width: '100%', marginTop: 20, padding: '15px',
+        background: !file || converting ? '#f7f8fc' : 'linear-gradient(135deg, #ea580c, #d97706)',
+        border: `1.5px solid ${!file || converting ? '#e2e5f0' : '#ea580c'}`,
+        borderRadius: 12, color: !file || converting ? '#6b7394' : '#fff',
+        cursor: !file || converting ? 'not-allowed' : 'pointer',
+        fontFamily: 'var(--font)', fontWeight: 700, fontSize: 16,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+        boxShadow: file && !converting ? '0 4px 20px #ea580c40' : 'none',
+      }}>
+        {converting
+          ? <><Spinner color="#ea580c" /> Categorizing UPI payments…</>
+          : <><IconUPI /> Generate Spending Report</>
+        }
+      </button>
+
+      <p style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: '#6b7394' }}>
+        Only outgoing UPI payments — incoming credits & bank charges are ignored
       </p>
     </>
   )
@@ -369,8 +497,9 @@ export default function App() {
   const [tab, setTab] = useState('pdf')
 
   const tabs = [
-    { id: 'pdf',  label: 'PDF Converter', Icon: IconPDF },
+    { id: 'pdf',  label: 'PDF Converter',  Icon: IconPDF  },
     { id: 'bank', label: 'Bank Statement', Icon: IconBank },
+    { id: 'upi',  label: 'UPI Tracker',    Icon: IconUPI  },
   ]
 
   return (
@@ -396,14 +525,14 @@ export default function App() {
           <span style={{ color: '#2563eb' }}>for Everyone</span>
         </h1>
         <p style={{ fontSize: 17, color: '#6b7394', maxWidth: 480, margin: '0 auto 40px', lineHeight: 1.6 }}>
-          Convert PDFs · Extract bank statements · No sign-up · No watermarks · Files deleted instantly
+          Convert PDFs · Extract bank statements · Track UPI spending · No sign-up · Files deleted instantly
         </p>
 
         {/* TABS */}
         <div style={{ display: 'inline-flex', background: '#f7f8fc', border: '1px solid #e2e5f0', borderRadius: 14, padding: 5, gap: 4, marginBottom: 36 }}>
           {tabs.map(({ id, label, Icon }) => (
             <button key={id} onClick={() => setTab(id)} style={{
-              padding: '10px 24px', borderRadius: 10,
+              padding: '10px 20px', borderRadius: 10,
               background: tab === id ? '#fff' : 'none',
               border: 'none',
               boxShadow: tab === id ? '0 1px 6px rgba(0,0,0,0.1)' : 'none',
@@ -412,16 +541,19 @@ export default function App() {
               cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
               transition: 'all 0.15s',
             }}>
-              <span style={{ color: tab === id ? '#2563eb' : '#6b7394' }}><Icon /></span>
+              <span style={{ color: tab === id ? (id === 'upi' ? '#ea580c' : '#2563eb') : '#6b7394' }}><Icon /></span>
               {label}
               {id === 'bank' && <span style={{ fontSize: 10, background: '#7c3aed', color: '#fff', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>AI</span>}
+              {id === 'upi'  && <span style={{ fontSize: 10, background: '#ea580c', color: '#fff', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>AI</span>}
             </button>
           ))}
         </div>
 
         {/* CARD */}
         <div style={{ maxWidth: 600, margin: '0 auto', background: '#fff', border: '1px solid #e2e5f0', borderRadius: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.1)', padding: 32, textAlign: 'left' }}>
-          {tab === 'pdf' ? <PDFConverter /> : <BankStatement />}
+          {tab === 'pdf'  && <PDFConverter />}
+          {tab === 'bank' && <BankStatement />}
+          {tab === 'upi'  && <UPITracker />}
         </div>
 
         {/* Trust row */}
@@ -435,14 +567,15 @@ export default function App() {
       {/* FEATURES */}
       <div style={{ padding: '64px 24px', background: '#f7f8fc', textAlign: 'center' }}>
         <h2 style={{ fontFamily: 'var(--font)', fontWeight: 800, fontSize: 'clamp(22px, 4vw, 34px)', color: '#0f1523', marginBottom: 40, letterSpacing: '-0.02em' }}>
-          Two powerful tools in one place
+          Three powerful tools in one place
         </h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20, maxWidth: 860, margin: '0 auto' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20, maxWidth: 960, margin: '0 auto' }}>
           {[
-            { Icon: IconWord, title: 'PDF → Word', desc: 'Preserves fonts, headings and layout. Best for text documents and reports.', color: '#2563eb', light: '#eff4ff' },
-            { Icon: IconExcel, title: 'PDF → Excel', desc: 'Extracts tables from PDFs into clean formatted spreadsheets automatically.', color: '#16a34a', light: '#f0fdf4' },
-            { Icon: IconBank, title: 'Bank Statement → Excel', desc: 'AI reads any bank statement — image or PDF — and extracts every transaction into a spreadsheet.', color: '#7c3aed', light: '#f5f3ff' },
-            { Icon: IconAI, title: 'AI-Powered Extraction', desc: 'Works with SBI, HDFC, ICICI, Axis, Kotak, Yes Bank and all other Indian banks automatically.', color: '#d97706', light: '#fffbeb' },
+            { Icon: IconWord,  title: 'PDF → Word',           desc: 'Preserves fonts, headings and layout. Best for text documents and reports.',                                                             color: '#2563eb', light: '#eff4ff' },
+            { Icon: IconExcel, title: 'PDF → Excel',          desc: 'Extracts tables from PDFs into clean formatted spreadsheets automatically.',                                                             color: '#16a34a', light: '#f0fdf4' },
+            { Icon: IconBank,  title: 'Bank Statement → Excel',desc: 'AI reads any bank statement — image or PDF — and extracts every transaction into a spreadsheet.',                                       color: '#7c3aed', light: '#f5f3ff' },
+            { Icon: IconUPI,   title: 'UPI Spending Tracker',  desc: 'Upload your bank PDF and get a categorized breakdown of all UPI payments — Food, Transport, Shopping and more.',                        color: '#ea580c', light: '#fff7ed' },
+            { Icon: IconAI,    title: 'AI-Powered Extraction', desc: 'Works with SBI, HDFC, ICICI, Axis, Kotak, Yes Bank and all other Indian banks automatically.',                                          color: '#d97706', light: '#fffbeb' },
           ].map(({ Icon, title, desc, color, light }) => (
             <div key={title} style={{ background: '#fff', border: '1px solid #e2e5f0', borderRadius: 16, padding: '24px', textAlign: 'left', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
               <div style={{ width: 44, height: 44, borderRadius: 12, background: light, display: 'grid', placeItems: 'center', color, marginBottom: 14 }}><Icon /></div>
@@ -466,4 +599,3 @@ export default function App() {
     </div>
   )
 }
- 
