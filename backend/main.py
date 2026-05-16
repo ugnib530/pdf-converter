@@ -27,7 +27,7 @@ ALLOWED_MIME = {"application/pdf", "application/octet-stream"}
 CLEANUP_AFTER_SECONDS = 300  # 5 minutes
 
 
-# ─── Lifespan: background cleanup task ──────────────────────────────────────
+# ─── Lifespan: background cleanup task ────────────────────────────────────── sigma boys only here
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(cleanup_loop())
