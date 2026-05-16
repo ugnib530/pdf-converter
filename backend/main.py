@@ -90,6 +90,15 @@ def temp_path(ext: str) -> Path:
 async def health():
     return {"status": "ok"}
 
+@app.get("/debug-env")
+async def debug_env():
+    key = os.environ.get("GEMINI_API_KEY", "")
+    return {
+        "key_present": bool(key),
+        "key_length": len(key),
+        "key_prefix": key[:8] if key else None
+    }
+
 
 @app.post("/convert/word")
 @limiter.limit("10/minute")
