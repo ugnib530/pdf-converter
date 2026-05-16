@@ -235,8 +235,8 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
     categorize them (Food, Transport, etc.), and return a
     formatted Excel with category → merchant → amount breakdown.
     """
-    import anthropic
-    import base64
+    from google import genai
+    from google.genai import types
     import json
     import pdfplumber
     import openpyxl
@@ -244,9 +244,9 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
     from openpyxl.utils import get_column_letter
     from collections import defaultdict
 
-    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured on server.")
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    if not GEMINI_API_KEY:
+        raise HTTPException(500, "GEMINI_API_KEY not configured on server.")
 
     content = await file.read()
     validate_pdf(file, content)
@@ -266,41 +266,27 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
                 if page_text:
                     raw_text += page_text + "\n"
 
-        # ── Step 2: Send to Claude ────────────────────────────────────────────
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        # ── Step 2: Send to Gemini ────────────────────────────────────────────
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        logger.info("Sending to Gemini for UPI extraction...")
 
         if len(raw_text.strip()) > 200:
-            # Text-based PDF — use text mode (cheaper, faster)
-            prompt_content = [
-                {
-                    "type": "text",
-                    "text": UPI_PROMPT + "\n\nBANK STATEMENT TEXT:\n" + raw_text
-                }
-            ]
+            # Text-based PDF — send extracted text (faster, cheaper)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=UPI_PROMPT + "\n\nBANK STATEMENT TEXT:\n" + raw_text
+            )
         else:
-            # Scanned/image PDF — fall back to vision
-            b64 = base64.standard_b64encode(content).decode("utf-8")
-            prompt_content = [
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": b64
-                    }
-                },
-                {"type": "text", "text": UPI_PROMPT}
-            ]
+            # Scanned/image PDF — send PDF bytes directly for vision
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[
+                    types.Part.from_bytes(data=content, mime_type="application/pdf"),
+                    UPI_PROMPT
+                ]
+            )
 
-        logger.info("Sending to Claude for UPI extraction...")
-
-        response = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt_content}]
-        )
-
-        raw = response.content[0].text.strip()
+        raw = response.text.strip()
 
         # Strip markdown fences if present
         if raw.startswith("```"):
@@ -311,16 +297,15 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
 
         data = json.loads(raw)
 
-        transactions    = data.get("transactions", [])
-        bank_name       = data.get("bank_name", "")
-        account_holder  = data.get("account_holder", "")
+        transactions     = data.get("transactions", [])
+        bank_name        = data.get("bank_name", "")
+        account_holder   = data.get("account_holder", "")
         statement_period = data.get("statement_period", "")
 
         if not transactions:
             raise HTTPException(422, "No outgoing UPI payments found in this statement.")
 
         # ── Step 3: Group by category → merchant ─────────────────────────────
-        # Structure: { "Food": { "Zomato": [450.0, 320.0], ... }, ... }
         grouped = defaultdict(lambda: defaultdict(list))
         for txn in transactions:
             cat      = str(txn.get("category", "Other")).strip() or "Other"
@@ -336,180 +321,120 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
         ws = wb.active
         ws.title = "UPI Spending"
 
-        # ── Styles ────────────────────────────────────────────────────────────
-        # Meta
-        meta_font  = Font(bold=True, size=11, color="1e40af")
-        # Category header
-        cat_font   = Font(bold=True, size=12, color="FFFFFF")
-        cat_fills  = [
-            PatternFill("solid", fgColor="1e40af"),  # blue
-            PatternFill("solid", fgColor="0f766e"),  # teal
-            PatternFill("solid", fgColor="7c3aed"),  # purple
-            PatternFill("solid", fgColor="b45309"),  # amber
-            PatternFill("solid", fgColor="be123c"),  # rose
-            PatternFill("solid", fgColor="0369a1"),  # sky
-            PatternFill("solid", fgColor="4d7c0f"),  # lime
-            PatternFill("solid", fgColor="9333ea"),  # violet
+        # Styles
+        meta_font     = Font(bold=True, size=11, color="1e40af")
+        cat_font      = Font(bold=True, size=12, color="FFFFFF")
+        cat_fills     = [
+            PatternFill("solid", fgColor="1e40af"),
+            PatternFill("solid", fgColor="0f766e"),
+            PatternFill("solid", fgColor="7c3aed"),
+            PatternFill("solid", fgColor="b45309"),
+            PatternFill("solid", fgColor="be123c"),
+            PatternFill("solid", fgColor="0369a1"),
+            PatternFill("solid", fgColor="4d7c0f"),
+            PatternFill("solid", fgColor="9333ea"),
         ]
-        # Merchant row
         merchant_font = Font(size=11, color="1e293b")
         merchant_fill = PatternFill("solid", fgColor="F1F5F9")
         alt_fill      = PatternFill("solid", fgColor="FFFFFF")
-        # Subtotal
         sub_font      = Font(bold=True, size=11, color="475569")
         sub_fill      = PatternFill("solid", fgColor="E2E8F0")
-        # Grand total
         grand_font    = Font(bold=True, size=12, color="FFFFFF")
         grand_fill    = PatternFill("solid", fgColor="0f172a")
-        # Border
         thin          = Side(style="thin", color="CBD5E1")
         border        = Border(left=thin, right=thin, top=thin, bottom=thin)
         left_align    = Alignment(horizontal="left",  vertical="center", indent=1)
         right_align   = Alignment(horizontal="right", vertical="center")
         center_align  = Alignment(horizontal="center", vertical="center")
 
-        # Column setup: A=Merchant (wide), B=Amount (medium)
         ws.column_dimensions["A"].width = 38
         ws.column_dimensions["B"].width = 18
 
-        # ── Meta rows ─────────────────────────────────────────────────────────
+        # Meta rows
         current_row = 1
-        meta_data = [
-            ("Bank",             bank_name),
-            ("Account Holder",   account_holder),
-            ("Statement Period", statement_period),
-        ]
-        for label, value in meta_data:
+        for label, value in [("Bank", bank_name), ("Account Holder", account_holder), ("Statement Period", statement_period)]:
             ws.cell(row=current_row, column=1, value=label).font = meta_font
-            cell = ws.cell(row=current_row, column=2, value=value)
-            cell.alignment = right_align
+            ws.cell(row=current_row, column=2, value=value).alignment = right_align
             current_row += 1
 
         current_row += 1  # blank row
 
-        # ── Column headers ────────────────────────────────────────────────────
+        # Column headers
         hdr_fill = PatternFill("solid", fgColor="334155")
         for col, label in [(1, "Service / Merchant"), (2, "Amount (₹)")]:
             cell = ws.cell(row=current_row, column=col, value=label)
-            cell.font      = Font(bold=True, color="FFFFFF", size=11)
-            cell.fill      = hdr_fill
-            cell.border    = border
+            cell.font = Font(bold=True, color="FFFFFF", size=11)
+            cell.fill = hdr_fill
+            cell.border = border
             cell.alignment = center_align
         ws.row_dimensions[current_row].height = 22
         ws.freeze_panes = ws.cell(row=current_row + 1, column=1)
         current_row += 1
 
-        # ── Category blocks ───────────────────────────────────────────────────
+        # Category blocks
         grand_total = 0.0
-
         CATEGORY_EMOJIS = {
-            "food":          "🍔",
-            "transport":     "🚗",
-            "travel":        "✈️",
-            "shopping":      "🛍️",
-            "entertainment": "🎬",
-            "subscriptions": "📱",
-            "medicine":      "💊",
-            "health":        "💊",
-            "education":     "📚",
-            "utilities":     "💡",
-            "bills":         "📄",
-            "groceries":     "🛒",
-            "salary":        "💰",
-            "transfer":      "🔄",
-            "other":         "📦",
+            "food": "🍔", "transport": "🚗", "travel": "✈️",
+            "shopping": "🛍️", "entertainment": "🎬", "subscriptions": "📱",
+            "medicine": "💊", "health": "💊", "education": "📚",
+            "utilities": "💡", "bills": "📄", "groceries": "🛒",
+            "salary": "💰", "transfer": "🔄", "other": "📦",
         }
 
         def get_emoji(cat_name: str) -> str:
             return CATEGORY_EMOJIS.get(cat_name.lower(), "📦")
 
         for cat_idx, (category, merchants) in enumerate(sorted(grouped.items())):
-            fill = cat_fills[cat_idx % len(cat_fills)]
+            fill  = cat_fills[cat_idx % len(cat_fills)]
             emoji = get_emoji(category)
 
-            # Category header row
-            cat_label = f"  {emoji}  {category.upper()}"
-            cell_a = ws.cell(row=current_row, column=1, value=cat_label)
-            cell_a.font      = cat_font
-            cell_a.fill      = fill
-            cell_a.border    = border
-            cell_a.alignment = left_align
-
+            cell_a = ws.cell(row=current_row, column=1, value=f"  {emoji}  {category.upper()}")
+            cell_a.font = cat_font; cell_a.fill = fill; cell_a.border = border; cell_a.alignment = left_align
             cell_b = ws.cell(row=current_row, column=2, value="")
-            cell_b.fill   = fill
-            cell_b.border = border
+            cell_b.fill = fill; cell_b.border = border
             ws.row_dimensions[current_row].height = 22
             current_row += 1
 
-            cat_total = 0.0
+            cat_total    = 0.0
             merchant_alt = False
 
             for merchant, amounts in sorted(merchants.items()):
                 merchant_total = round(sum(amounts), 2)
                 cat_total     += merchant_total
-
-                mfill = merchant_fill if merchant_alt else alt_fill
-                merchant_alt  = not merchant_alt
+                mfill          = merchant_fill if merchant_alt else alt_fill
+                merchant_alt   = not merchant_alt
 
                 cell_a = ws.cell(row=current_row, column=1, value=f"    {merchant}")
-                cell_a.font      = merchant_font
-                cell_a.fill      = mfill
-                cell_a.border    = border
-                cell_a.alignment = left_align
+                cell_a.font = merchant_font; cell_a.fill = mfill; cell_a.border = border; cell_a.alignment = left_align
 
                 cell_b = ws.cell(row=current_row, column=2, value=merchant_total)
-                cell_b.font      = merchant_font
-                cell_b.fill      = mfill
-                cell_b.border    = border
-                cell_b.alignment = right_align
-                cell_b.number_format = '#,##0.00'
-
+                cell_b.font = merchant_font; cell_b.fill = mfill; cell_b.border = border
+                cell_b.alignment = right_align; cell_b.number_format = '#,##0.00'
                 current_row += 1
 
-            # Category subtotal
             grand_total += cat_total
-            cat_total = round(cat_total, 2)
-
             cell_a = ws.cell(row=current_row, column=1, value=f"  Subtotal — {category}")
-            cell_a.font      = sub_font
-            cell_a.fill      = sub_fill
-            cell_a.border    = border
-            cell_a.alignment = left_align
+            cell_a.font = sub_font; cell_a.fill = sub_fill; cell_a.border = border; cell_a.alignment = left_align
+            cell_b = ws.cell(row=current_row, column=2, value=round(cat_total, 2))
+            cell_b.font = sub_font; cell_b.fill = sub_fill; cell_b.border = border
+            cell_b.alignment = right_align; cell_b.number_format = '#,##0.00'
+            current_row += 2
 
-            cell_b = ws.cell(row=current_row, column=2, value=cat_total)
-            cell_b.font          = sub_font
-            cell_b.fill          = sub_fill
-            cell_b.border        = border
-            cell_b.alignment     = right_align
-            cell_b.number_format = '#,##0.00'
-
-            current_row += 2  # gap between categories
-
-        # ── Grand Total ───────────────────────────────────────────────────────
+        # Grand Total
         cell_a = ws.cell(row=current_row, column=1, value="  💳  GRAND TOTAL")
-        cell_a.font      = grand_font
-        cell_a.fill      = grand_fill
-        cell_a.border    = border
-        cell_a.alignment = left_align
-
+        cell_a.font = grand_font; cell_a.fill = grand_fill; cell_a.border = border; cell_a.alignment = left_align
         cell_b = ws.cell(row=current_row, column=2, value=round(grand_total, 2))
-        cell_b.font          = grand_font
-        cell_b.fill          = grand_fill
-        cell_b.border        = border
-        cell_b.alignment     = right_align
-        cell_b.number_format = '#,##0.00'
+        cell_b.font = grand_font; cell_b.fill = grand_fill; cell_b.border = border
+        cell_b.alignment = right_align; cell_b.number_format = '#,##0.00'
         ws.row_dimensions[current_row].height = 24
 
-        # ── Also add a raw transactions sheet ────────────────────────────────
+        # Raw Transactions sheet
         ws2 = wb.create_sheet(title="Raw Transactions")
-        raw_headers = ["Date", "Merchant", "Category", "Amount (₹)", "UPI ID / Reference"]
         hdr2_fill = PatternFill("solid", fgColor="1e40af")
-        for col, h in enumerate(raw_headers, start=1):
+        for col, h in enumerate(["Date", "Merchant", "Category", "Amount (₹)", "UPI ID / Reference"], start=1):
             cell = ws2.cell(row=1, column=col, value=h)
-            cell.font      = Font(bold=True, color="FFFFFF", size=11)
-            cell.fill      = hdr2_fill
-            cell.border    = border
-            cell.alignment = center_align
+            cell.font = Font(bold=True, color="FFFFFF", size=11)
+            cell.fill = hdr2_fill; cell.border = border; cell.alignment = center_align
         ws2.row_dimensions[1].height = 20
 
         for i, txn in enumerate(transactions, start=2):
@@ -518,26 +443,14 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
             except (ValueError, TypeError):
                 amt = 0.0
             row_fill = merchant_fill if i % 2 == 0 else alt_fill
-            vals = [
-                txn.get("date", ""),
-                txn.get("merchant", ""),
-                txn.get("category", ""),
-                amt,
-                txn.get("upi_id", ""),
-            ]
-            for col, val in enumerate(vals, start=1):
+            for col, val in enumerate([txn.get("date",""), txn.get("merchant",""), txn.get("category",""), amt, txn.get("upi_id","")], start=1):
                 cell = ws2.cell(row=i, column=col, value=val)
-                cell.fill   = row_fill
-                cell.border = border
-                cell.alignment = left_align
+                cell.fill = row_fill; cell.border = border; cell.alignment = left_align
                 if col == 4:
                     cell.number_format = '#,##0.00'
 
-        ws2.column_dimensions["A"].width = 14
-        ws2.column_dimensions["B"].width = 28
-        ws2.column_dimensions["C"].width = 18
-        ws2.column_dimensions["D"].width = 16
-        ws2.column_dimensions["E"].width = 32
+        for col_letter, width in zip(["A","B","C","D","E"], [14, 28, 18, 16, 32]):
+            ws2.column_dimensions[col_letter].width = width
         ws2.freeze_panes = ws2["A2"]
 
         wb.save(str(xlsx_path))
@@ -552,7 +465,7 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
     except HTTPException:
         raise
     except json.JSONDecodeError:
-        logger.error("Claude returned non-JSON for UPI tracker")
+        logger.error("Gemini returned non-JSON for UPI tracker")
         raise HTTPException(500, "Could not parse AI response. Try a clearer PDF.")
     except Exception as e:
         logger.error(f"UPI tracker error: {e}")
