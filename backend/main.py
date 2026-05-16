@@ -226,72 +226,78 @@ async def convert_to_excel(request: Request, file: UploadFile = File(...)):
         pdf_path.unlink(missing_ok=True)
 
 
-# ─── Bank Statement Endpoint ─────────────────────────────────────────────────
-@app.post("/convert/bank-statement")
+# ─── UPI Tracker Endpoint ────────────────────────────────────────────────────
+@app.post("/convert/upi-tracker")
 @limiter.limit("5/minute")
-async def convert_bank_statement(request: Request, file: UploadFile = File(...)):
-    """Convert bank statement image or PDF → XLSX using Claude Haiku vision."""
+async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
+    """
+    Extract outgoing UPI payments from a bank statement PDF,
+    categorize them (Food, Transport, etc.), and return a
+    formatted Excel with category → merchant → amount breakdown.
+    """
     import anthropic
     import base64
     import json
+    import pdfplumber
     import openpyxl
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    from collections import defaultdict
 
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
     if not ANTHROPIC_API_KEY:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured on server.")
 
     content = await file.read()
-    if len(content) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(413, f"File too large. Maximum is {MAX_FILE_SIZE_MB} MB.")
+    validate_pdf(file, content)
 
-    filename = file.filename.lower()
-    is_pdf = filename.endswith(".pdf") or file.content_type == "application/pdf"
-    is_image = any(filename.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"])
-
-    if not is_pdf and not is_image:
-        raise HTTPException(400, "Only PDF or image files (JPG, PNG, WEBP) are accepted.")
-
+    pdf_path  = temp_path("pdf")
     xlsx_path = temp_path("xlsx")
 
     try:
+        pdf_path.write_bytes(content)
+        logger.info(f"UPI tracker: processing {file.filename}")
+
+        # ── Step 1: Extract text from PDF ────────────────────────────────────
+        raw_text = ""
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    raw_text += page_text + "\n"
+
+        # ── Step 2: Send to Claude ────────────────────────────────────────────
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-        # Build message content for Claude
-        if is_pdf:
-            b64 = base64.standard_b64encode(content).decode("utf-8")
-            msg_content = [
+        if len(raw_text.strip()) > 200:
+            # Text-based PDF — use text mode (cheaper, faster)
+            prompt_content = [
                 {
-                    "type": "document",
-                    "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
-                },
-                {"type": "text", "text": BANK_PROMPT},
+                    "type": "text",
+                    "text": UPI_PROMPT + "\n\nBANK STATEMENT TEXT:\n" + raw_text
+                }
             ]
         else:
+            # Scanned/image PDF — fall back to vision
             b64 = base64.standard_b64encode(content).decode("utf-8")
-            # detect mime type
-            if filename.endswith(".png"):
-                mime = "image/png"
-            elif filename.endswith(".webp"):
-                mime = "image/webp"
-            elif filename.endswith(".gif"):
-                mime = "image/gif"
-            else:
-                mime = "image/jpeg"
-            msg_content = [
+            prompt_content = [
                 {
-                    "type": "image",
-                    "source": {"type": "base64", "media_type": mime, "data": b64},
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": b64
+                    }
                 },
-                {"type": "text", "text": BANK_PROMPT},
+                {"type": "text", "text": UPI_PROMPT}
             ]
 
-        logger.info(f"Sending bank statement to Claude Haiku: {file.filename}")
+        logger.info("Sending to Claude for UPI extraction...")
 
         response = client.messages.create(
             model="claude-haiku-4-5",
             max_tokens=4096,
-            messages=[{"role": "user", "content": msg_content}],
+            messages=[{"role": "user", "content": prompt_content}]
         )
 
         raw = response.content[0].text.strip()
@@ -304,94 +310,235 @@ async def convert_bank_statement(request: Request, file: UploadFile = File(...))
         raw = raw.strip()
 
         data = json.loads(raw)
-        transactions = data.get("transactions", [])
-        bank_name = data.get("bank_name", "")
-        account_holder = data.get("account_holder", "")
-        account_number = data.get("account_number", "")
+
+        transactions    = data.get("transactions", [])
+        bank_name       = data.get("bank_name", "")
+        account_holder  = data.get("account_holder", "")
         statement_period = data.get("statement_period", "")
 
         if not transactions:
-            raise HTTPException(422, "No transactions found in the statement. Make sure the image is clear and contains transaction data.")
+            raise HTTPException(422, "No outgoing UPI payments found in this statement.")
 
-        # ── Build Excel ──────────────────────────────────────────────────────
+        # ── Step 3: Group by category → merchant ─────────────────────────────
+        # Structure: { "Food": { "Zomato": [450.0, 320.0], ... }, ... }
+        grouped = defaultdict(lambda: defaultdict(list))
+        for txn in transactions:
+            cat      = str(txn.get("category", "Other")).strip() or "Other"
+            merchant = str(txn.get("merchant", "Unknown")).strip() or "Unknown"
+            try:
+                amount = float(str(txn.get("amount", 0)).replace(",", ""))
+            except (ValueError, TypeError):
+                amount = 0.0
+            grouped[cat][merchant].append(amount)
+
+        # ── Step 4: Build Excel ───────────────────────────────────────────────
         wb = openpyxl.Workbook()
         ws = wb.active
-        ws.title = "Transactions"
+        ws.title = "UPI Spending"
 
-        # Styles
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_fill = PatternFill("solid", fgColor="1e40af")
-        alt_fill    = PatternFill("solid", fgColor="EFF6FF")
-        thin        = Side(style="thin", color="CBD5E1")
-        border      = Border(left=thin, right=thin, top=thin, bottom=thin)
-        center      = Alignment(horizontal="center", vertical="center")
-        left        = Alignment(horizontal="left",   vertical="center")
+        # ── Styles ────────────────────────────────────────────────────────────
+        # Meta
+        meta_font  = Font(bold=True, size=11, color="1e40af")
+        # Category header
+        cat_font   = Font(bold=True, size=12, color="FFFFFF")
+        cat_fills  = [
+            PatternFill("solid", fgColor="1e40af"),  # blue
+            PatternFill("solid", fgColor="0f766e"),  # teal
+            PatternFill("solid", fgColor="7c3aed"),  # purple
+            PatternFill("solid", fgColor="b45309"),  # amber
+            PatternFill("solid", fgColor="be123c"),  # rose
+            PatternFill("solid", fgColor="0369a1"),  # sky
+            PatternFill("solid", fgColor="4d7c0f"),  # lime
+            PatternFill("solid", fgColor="9333ea"),  # violet
+        ]
+        # Merchant row
+        merchant_font = Font(size=11, color="1e293b")
+        merchant_fill = PatternFill("solid", fgColor="F1F5F9")
+        alt_fill      = PatternFill("solid", fgColor="FFFFFF")
+        # Subtotal
+        sub_font      = Font(bold=True, size=11, color="475569")
+        sub_fill      = PatternFill("solid", fgColor="E2E8F0")
+        # Grand total
+        grand_font    = Font(bold=True, size=12, color="FFFFFF")
+        grand_fill    = PatternFill("solid", fgColor="0f172a")
+        # Border
+        thin          = Side(style="thin", color="CBD5E1")
+        border        = Border(left=thin, right=thin, top=thin, bottom=thin)
+        left_align    = Alignment(horizontal="left",  vertical="center", indent=1)
+        right_align   = Alignment(horizontal="right", vertical="center")
+        center_align  = Alignment(horizontal="center", vertical="center")
 
-        # ── Meta info rows ───────────────────────────────────────────────────
-        meta_font = Font(bold=True, size=11, color="1e40af")
-        meta_rows = [
-            ("Bank", bank_name),
-            ("Account Holder", account_holder),
-            ("Account Number", account_number),
+        # Column setup: A=Merchant (wide), B=Amount (medium)
+        ws.column_dimensions["A"].width = 38
+        ws.column_dimensions["B"].width = 18
+
+        # ── Meta rows ─────────────────────────────────────────────────────────
+        current_row = 1
+        meta_data = [
+            ("Bank",             bank_name),
+            ("Account Holder",   account_holder),
             ("Statement Period", statement_period),
         ]
-        for i, (label, value) in enumerate(meta_rows, start=1):
-            ws.cell(row=i, column=1, value=label).font = meta_font
-            ws.cell(row=i, column=2, value=value)
+        for label, value in meta_data:
+            ws.cell(row=current_row, column=1, value=label).font = meta_font
+            cell = ws.cell(row=current_row, column=2, value=value)
+            cell.alignment = right_align
+            current_row += 1
 
-        # blank row
-        blank_row = len(meta_rows) + 2
+        current_row += 1  # blank row
 
-        # ── Headers ──────────────────────────────────────────────────────────
-        HEADERS = ["Date", "Description", "Type", "Debit (₹)", "Credit (₹)", "Balance (₹)", "Reference / ID", "Category"]
-        header_row = blank_row
-        for col, h in enumerate(HEADERS, start=1):
-            cell = ws.cell(row=header_row, column=col, value=h)
-            cell.font   = header_font
-            cell.fill   = header_fill
-            cell.border = border
-            cell.alignment = center
-        ws.row_dimensions[header_row].height = 22
+        # ── Column headers ────────────────────────────────────────────────────
+        hdr_fill = PatternFill("solid", fgColor="334155")
+        for col, label in [(1, "Service / Merchant"), (2, "Amount (₹)")]:
+            cell = ws.cell(row=current_row, column=col, value=label)
+            cell.font      = Font(bold=True, color="FFFFFF", size=11)
+            cell.fill      = hdr_fill
+            cell.border    = border
+            cell.alignment = center_align
+        ws.row_dimensions[current_row].height = 22
+        ws.freeze_panes = ws.cell(row=current_row + 1, column=1)
+        current_row += 1
 
-        # ── Data rows ────────────────────────────────────────────────────────
-        for idx, txn in enumerate(transactions, start=1):
-            row = header_row + idx
-            fill = alt_fill if idx % 2 == 0 else None
-            values = [
+        # ── Category blocks ───────────────────────────────────────────────────
+        grand_total = 0.0
+
+        CATEGORY_EMOJIS = {
+            "food":          "🍔",
+            "transport":     "🚗",
+            "travel":        "✈️",
+            "shopping":      "🛍️",
+            "entertainment": "🎬",
+            "subscriptions": "📱",
+            "medicine":      "💊",
+            "health":        "💊",
+            "education":     "📚",
+            "utilities":     "💡",
+            "bills":         "📄",
+            "groceries":     "🛒",
+            "salary":        "💰",
+            "transfer":      "🔄",
+            "other":         "📦",
+        }
+
+        def get_emoji(cat_name: str) -> str:
+            return CATEGORY_EMOJIS.get(cat_name.lower(), "📦")
+
+        for cat_idx, (category, merchants) in enumerate(sorted(grouped.items())):
+            fill = cat_fills[cat_idx % len(cat_fills)]
+            emoji = get_emoji(category)
+
+            # Category header row
+            cat_label = f"  {emoji}  {category.upper()}"
+            cell_a = ws.cell(row=current_row, column=1, value=cat_label)
+            cell_a.font      = cat_font
+            cell_a.fill      = fill
+            cell_a.border    = border
+            cell_a.alignment = left_align
+
+            cell_b = ws.cell(row=current_row, column=2, value="")
+            cell_b.fill   = fill
+            cell_b.border = border
+            ws.row_dimensions[current_row].height = 22
+            current_row += 1
+
+            cat_total = 0.0
+            merchant_alt = False
+
+            for merchant, amounts in sorted(merchants.items()):
+                merchant_total = round(sum(amounts), 2)
+                cat_total     += merchant_total
+
+                mfill = merchant_fill if merchant_alt else alt_fill
+                merchant_alt  = not merchant_alt
+
+                cell_a = ws.cell(row=current_row, column=1, value=f"    {merchant}")
+                cell_a.font      = merchant_font
+                cell_a.fill      = mfill
+                cell_a.border    = border
+                cell_a.alignment = left_align
+
+                cell_b = ws.cell(row=current_row, column=2, value=merchant_total)
+                cell_b.font      = merchant_font
+                cell_b.fill      = mfill
+                cell_b.border    = border
+                cell_b.alignment = right_align
+                cell_b.number_format = '#,##0.00'
+
+                current_row += 1
+
+            # Category subtotal
+            grand_total += cat_total
+            cat_total = round(cat_total, 2)
+
+            cell_a = ws.cell(row=current_row, column=1, value=f"  Subtotal — {category}")
+            cell_a.font      = sub_font
+            cell_a.fill      = sub_fill
+            cell_a.border    = border
+            cell_a.alignment = left_align
+
+            cell_b = ws.cell(row=current_row, column=2, value=cat_total)
+            cell_b.font          = sub_font
+            cell_b.fill          = sub_fill
+            cell_b.border        = border
+            cell_b.alignment     = right_align
+            cell_b.number_format = '#,##0.00'
+
+            current_row += 2  # gap between categories
+
+        # ── Grand Total ───────────────────────────────────────────────────────
+        cell_a = ws.cell(row=current_row, column=1, value="  💳  GRAND TOTAL")
+        cell_a.font      = grand_font
+        cell_a.fill      = grand_fill
+        cell_a.border    = border
+        cell_a.alignment = left_align
+
+        cell_b = ws.cell(row=current_row, column=2, value=round(grand_total, 2))
+        cell_b.font          = grand_font
+        cell_b.fill          = grand_fill
+        cell_b.border        = border
+        cell_b.alignment     = right_align
+        cell_b.number_format = '#,##0.00'
+        ws.row_dimensions[current_row].height = 24
+
+        # ── Also add a raw transactions sheet ────────────────────────────────
+        ws2 = wb.create_sheet(title="Raw Transactions")
+        raw_headers = ["Date", "Merchant", "Category", "Amount (₹)", "UPI ID / Reference"]
+        hdr2_fill = PatternFill("solid", fgColor="1e40af")
+        for col, h in enumerate(raw_headers, start=1):
+            cell = ws2.cell(row=1, column=col, value=h)
+            cell.font      = Font(bold=True, color="FFFFFF", size=11)
+            cell.fill      = hdr2_fill
+            cell.border    = border
+            cell.alignment = center_align
+        ws2.row_dimensions[1].height = 20
+
+        for i, txn in enumerate(transactions, start=2):
+            try:
+                amt = float(str(txn.get("amount", 0)).replace(",", ""))
+            except (ValueError, TypeError):
+                amt = 0.0
+            row_fill = merchant_fill if i % 2 == 0 else alt_fill
+            vals = [
                 txn.get("date", ""),
-                txn.get("description", ""),
-                txn.get("type", ""),
-                txn.get("debit", ""),
-                txn.get("credit", ""),
-                txn.get("balance", ""),
-                txn.get("reference", ""),
+                txn.get("merchant", ""),
                 txn.get("category", ""),
+                amt,
+                txn.get("upi_id", ""),
             ]
-            for col, val in enumerate(values, start=1):
-                cell = ws.cell(row=row, column=col, value=val)
+            for col, val in enumerate(vals, start=1):
+                cell = ws2.cell(row=i, column=col, value=val)
+                cell.fill   = row_fill
                 cell.border = border
-                cell.alignment = left
-                if fill:
-                    cell.fill = fill
+                cell.alignment = left_align
+                if col == 4:
+                    cell.number_format = '#,##0.00'
 
-        # ── Summary rows ─────────────────────────────────────────────────────
-        last_data_row = header_row + len(transactions)
-        summary_row   = last_data_row + 2
-
-        total_debit  = sum(float(str(t.get("debit",  0) or 0).replace(",", "")) for t in transactions)
-        total_credit = sum(float(str(t.get("credit", 0) or 0).replace(",", "")) for t in transactions)
-
-        ws.cell(row=summary_row, column=3, value="TOTALS").font = Font(bold=True)
-        ws.cell(row=summary_row, column=4, value=round(total_debit,  2)).font = Font(bold=True, color="DC2626")
-        ws.cell(row=summary_row, column=5, value=round(total_credit, 2)).font = Font(bold=True, color="16A34A")
-
-        # ── Column widths ─────────────────────────────────────────────────────
-        col_widths = [14, 40, 12, 14, 14, 14, 20, 16]
-        for i, w in enumerate(col_widths, start=1):
-            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
-
-        # freeze panes below header
-        ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
+        ws2.column_dimensions["A"].width = 14
+        ws2.column_dimensions["B"].width = 28
+        ws2.column_dimensions["C"].width = 18
+        ws2.column_dimensions["D"].width = 16
+        ws2.column_dimensions["E"].width = 32
+        ws2.freeze_panes = ws2["A2"]
 
         wb.save(str(xlsx_path))
 
@@ -399,49 +546,48 @@ async def convert_bank_statement(request: Request, file: UploadFile = File(...))
         return FileResponse(
             path=str(xlsx_path),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=f"{stem}_transactions.xlsx",
+            filename=f"{stem}_upi_spending.xlsx",
         )
 
     except HTTPException:
         raise
     except json.JSONDecodeError:
-        logger.error("Claude returned non-JSON response")
-        raise HTTPException(500, "Could not parse AI response. Please try again with a clearer image.")
+        logger.error("Claude returned non-JSON for UPI tracker")
+        raise HTTPException(500, "Could not parse AI response. Try a clearer PDF.")
     except Exception as e:
-        logger.error(f"Bank statement error: {e}")
+        logger.error(f"UPI tracker error: {e}")
         raise HTTPException(500, f"Processing failed: {str(e)}")
     finally:
-        xlsx_path.unlink(missing_ok=True)
+        pdf_path.unlink(missing_ok=True)
+        # xlsx_path cleaned by background task
 
 
-BANK_PROMPT = """You are a bank statement parser. Extract ALL transactions from this bank statement image/PDF.
+UPI_PROMPT = """You are a bank statement analyst. Your job is to extract ONLY outgoing UPI payments from the statement.
 
-Return ONLY a valid JSON object with this exact structure, no markdown, no explanation:
+RULES:
+- Include ONLY debit/outgoing UPI transactions (payments made BY the account holder)
+- EXCLUDE: incoming credits, salary, refunds, ATM withdrawals, NEFT/RTGS/IMPS transfers to individuals, bank charges
+- UPI transactions are typically described with UPI/, UPI-pay, UPI ref, or contain a UPI ID like merchant@bank
+- Identify the real merchant name from the UPI ID or description (e.g. "ZOMATO@icici" → "Zomato", "SWIGGY.IN@axisb" → "Swiggy")
+- Assign each transaction a category from this list ONLY: Food, Transport, Shopping, Entertainment, Subscriptions, Medicine, Groceries, Utilities, Education, Other
+- Common mappings: Zomato/Swiggy/Blinkit/EatSure → Food, Uber/Ola/Rapido → Transport, Netflix/Spotify/Amazon Prime → Subscriptions, Amazon/Flipkart/Myntra → Shopping, Pharmeasy/Apollo/Netmeds → Medicine, BigBasket/Zepto/JioMart → Groceries, Electricity/Gas/Water bill → Utilities
+
+Return ONLY a valid JSON object, no markdown, no explanation:
 
 {
   "bank_name": "name of the bank",
-  "account_holder": "account holder name",
-  "account_number": "account number (last 4 digits only for safety)",
+  "account_holder": "account holder name if visible",
   "statement_period": "e.g. April 2025",
   "transactions": [
     {
       "date": "DD/MM/YYYY",
-      "description": "full transaction description",
-      "type": "debit or credit",
-      "debit": 0.00,
-      "credit": 0.00,
-      "balance": 0.00,
-      "reference": "transaction ID or reference number if present",
-      "category": "e.g. Food, Transfer, Bill, Salary, ATM, Shopping, etc."
+      "merchant": "Clean merchant name e.g. Zomato",
+      "category": "Food",
+      "amount": 450.00,
+      "upi_id": "raw UPI ID or reference from statement"
     }
   ]
 }
 
-Rules:
-- Extract every single transaction visible
-- For debit transactions: put amount in debit field, leave credit as 0
-- For credit transactions: put amount in credit field, leave debit as 0  
-- Use numbers only for amounts, no currency symbols
-- If a field is not visible, use empty string "" or 0
-- Categorize each transaction intelligently based on description
-- Return ONLY the JSON, nothing else"""
+If no outgoing UPI transactions are found, return an empty transactions array.
+Return ONLY the JSON, nothing else."""
