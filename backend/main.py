@@ -282,13 +282,13 @@ async def convert_upi_tracker(request: Request, file: UploadFile = File(...)):
         if len(raw_text.strip()) > 200:
             # Text-based PDF — send extracted text (faster, cheaper)
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-1.5-flash",
                 contents=UPI_PROMPT + "\n\nBANK STATEMENT TEXT:\n" + raw_text
             )
         else:
             # Scanned/image PDF — send PDF bytes directly for vision
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-1.5-flash",
                 contents=[
                     types.Part.from_bytes(data=content, mime_type="application/pdf"),
                     UPI_PROMPT
