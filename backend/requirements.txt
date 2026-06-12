@@ -1,9 +1,25 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
 python-multipart==0.0.9
+slowapi==0.1.9
+aiofiles==23.2.1
+
+# ── Phase 1: existing converters ──────────────────────────────────────────────
 pdf2docx==0.5.8
 pdfplumber==0.11.1
 openpyxl==3.1.3
-slowapi==0.1.9
-aiofiles==23.2.1
+
+# ── Phase 1: AI (UPI tracker) ─────────────────────────────────────────────────
 google-genai==1.5.0
+
+# ── Phase 2: Tier-1 tools (uncomment when implementing) ──────────────────────
+# pypdf>=4.3                 # merge, split, delete-pages, rotate
+# pikepdf>=9.0               # protect, unlock, flatten  (pulls in qpdf)
+# PyMuPDF>=1.24              # extract-images, redact, pdf-to-jpg/png
+# img2pdf>=0.5               # jpg/png → pdf (lossless)
+# python-pptx>=1.0           # pdf-to-pptx (page-as-image approach)
+
+# ── Phase 3: Tier-2 tools ─────────────────────────────────────────────────────
+# (ghostscript + qpdf installed as system packages in Dockerfile)
+# No extra Python deps — subprocess calls to gs / qpdf binaries.
