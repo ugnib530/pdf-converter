@@ -20,6 +20,13 @@
  *   options     Array of option descriptor objects (see below)
  *   phase       Which dev phase adds this tool (1-5). Used to mark "Coming Soon".
  *   aiPowered   true = show the AI badge on the card
+ *   uiMode      "page-grid" = ToolPage renders <PdfPageGrid> instead of
+ *               <ToolOptionsPanel>. Omit for the default options-panel UI.
+ *   gridMode    Required when uiMode is "page-grid". One of:
+ *                 "delete" — X/restore per page, converted to a `pages`
+ *                            range string for the existing delete-pages endpoint.
+ *                 "rotate" — per-page rotation, converted to a rotations map
+ *                            (requires backend support — see rotate.py).
  *
  * OPTION TYPES:
  *   { type: "select",     key, label, choices: [val, ...], default }
@@ -170,10 +177,9 @@ export const TOOLS = {
     endpoint: "/tools/delete-pages",
     multiFile: false,
     accept: [".pdf"],
-    options: [
-      { type: "page-range", key: "pages", label: "Pages to delete (e.g. 2, 4-6)",
-        required: true },
-    ],
+    options: [],
+    uiMode: "page-grid",
+    gridMode: "delete",
     phase: 2,
   },
   "rotate-pdf": {
