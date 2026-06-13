@@ -14,7 +14,7 @@ export default function App() {
 
   const goHome  = () => setActiveTool(null);
   const goTool  = (tool) => {
-    if (tool.phase === 1) setActiveTool(tool);
+    if (tool.phase <= 2) setActiveTool(tool);
   };
 
   return (
