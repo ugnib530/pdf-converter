@@ -44,12 +44,16 @@ export async function convertFiles(endpoint, files, options = {}, onProgress) {
   const form = new FormData();
 
   // The backend expects the field name "file" for single-file tools
-  // and "files" for multi-file tools.  We detect by array length.
+  // and "files" for multi-file tools (merge, images-to-pdf).
+  // We always send "files" when multiFile mode produced >1 file,
+  // and "file" for single uploads — matching FastAPI's parameter names.
   if (files.length === 1) {
     form.append('file', files[0]);
   } else {
     files.forEach(f => form.append('files', f));
   }
+  // Note: /tools/merge and /tools/images-to-pdf both declare
+  // `files: List[UploadFile]` so the plural field name is correct.
 
   // Append each option as a separate form field
   Object.entries(options).forEach(([key, value]) => {
