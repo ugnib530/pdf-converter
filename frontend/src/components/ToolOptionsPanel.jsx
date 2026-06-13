@@ -76,6 +76,7 @@ function OptionField({ descriptor, value, onChange }) {
   }
 
   if (type === 'password') {
+    const hint = required ? 'Enter password' : 'Enter password (leave blank if none)';
     return (
       <div>
         {labelEl}
@@ -83,13 +84,18 @@ function OptionField({ descriptor, value, onChange }) {
           type="password"
           value={value}
           required={required}
-          placeholder="Enter password"
+          placeholder={hint}
           onChange={(e) => onChange(e.target.value)}
           style={inputStyle}
           onFocus={e => e.target.style.borderColor = 'var(--accent, #6366f1)'}
           onBlur={e => e.target.style.borderColor = '#d1d5db'}
           autoComplete="new-password"
         />
+        {!required && (
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#9ca3af' }}>
+            Leave blank if the PDF has no password. This tool cannot crack unknown passwords.
+          </p>
+        )}
       </div>
     );
   }
