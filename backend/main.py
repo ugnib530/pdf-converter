@@ -20,11 +20,11 @@ from core.rate_limit import limiter
 from core.file_handling import cleanup_loop
 
 # ── Routers (uncomment as each Phase is completed) ────────────────────────────
-from routers.from_pdf import router as from_pdf_router   # Phase 1 (existing tools)
-# from routers.organize  import router as organize_router  # Phase 2
-# from routers.security  import router as security_router  # Phase 2
-# from routers.cleanup   import router as cleanup_router   # Phase 3
-# from routers.to_pdf    import router as to_pdf_router    # Phase 2
+from routers.from_pdf import router as from_pdf_router   # Phase 1 + 2
+from routers.organize  import router as organize_router  # Phase 2
+from routers.security  import router as security_router  # Phase 2
+from routers.to_pdf    import router as to_pdf_router    # Phase 2
+# from routers.cleanup   import router as cleanup_router  # Phase 3
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,10 +80,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(from_pdf_router, prefix="/tools", tags=["Convert from PDF"])
-# app.include_router(organize_router, prefix="/tools", tags=["Organize PDF"])
-# app.include_router(security_router, prefix="/tools", tags=["Security"])
+app.include_router(organize_router, prefix="/tools", tags=["Organize PDF"])
+app.include_router(security_router, prefix="/tools", tags=["Security"])
+app.include_router(to_pdf_router,   prefix="/tools", tags=["Convert to PDF"])
 # app.include_router(cleanup_router,  prefix="/tools", tags=["Edit & Optimize"])
-# app.include_router(to_pdf_router,   prefix="/tools", tags=["Convert to PDF"])
 
 
 # ── Utility routes ────────────────────────────────────────────────────────────
