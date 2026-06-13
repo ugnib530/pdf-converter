@@ -8,12 +8,14 @@
  *   tool     Tool config object from tools.js
  *   onBack   () => void   navigate back to homepage
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import FileDropzone      from '../components/FileDropzone';
 import ToolOptionsPanel  from '../components/ToolOptionsPanel';
+import PdfPageGrid       from '../components/PdfPageGrid';
 import ToolIcon          from '../components/ToolIcon';
 import { CATEGORIES }    from '../config/tools';
 import { convertFiles, downloadBlob, ApiError } from '../api/client';
+import { rangeStringFromIndices } from '../utils/pageRanges';
 
 // ── Stage constants ────────────────────────────────────────────────────────────
 const STAGE = { UPLOAD: 'upload', PROCESSING: 'processing', DONE: 'done', ERROR: 'error' };
@@ -25,6 +27,19 @@ export default function ToolPage({ tool, onBack }) {
   const [result,  setResult]  = useState(null);   // { blob, filename }
   const [error,   setError]   = useState('');
 
+  // ── Page-grid state (Delete Pages / Rotate, etc.) ────────────────────────────
+  const isPageGrid = tool.uiMode === 'page-grid';
+  const [removedPages,  setRemovedPages]  = useState(() => new Set());
+  const [rotations,     setRotations]     = useState(() => new Map());
+  const [pageCount,     setPageCount]     = useState(0);
+
+  // Reset grid selection whenever the uploaded file changes
+  useEffect(() => {
+    setRemovedPages(new Set());
+    setRotations(new Map());
+    setPageCount(0);
+  }, [files]);
+
   const accent = CATEGORIES[tool.category]?.color || '#6366f1';
 
   const handleOptionChange = useCallback((key, value) => {
@@ -34,11 +49,28 @@ export default function ToolPage({ tool, onBack }) {
   const handleConvert = useCallback(async () => {
     if (!files.length) return;
 
+    // Page-grid tools (e.g. Delete Pages) compute their options from the
+    // visual selection rather than ToolOptionsPanel inputs.
+    let submitOptions = options;
+    if (isPageGrid && tool.gridMode === 'delete') {
+      if (removedPages.size === 0) {
+        setError('Tap the X on at least one page to mark it for deletion.');
+        setStage(STAGE.ERROR);
+        return;
+      }
+      if (removedPages.size === pageCount) {
+        setError('You cannot delete every page — at least one page must remain.');
+        setStage(STAGE.ERROR);
+        return;
+      }
+      submitOptions = { ...options, pages: rangeStringFromIndices(removedPages) };
+    }
+
     setStage(STAGE.PROCESSING);
     setError('');
 
     try {
-      const res = await convertFiles(tool.endpoint, files, options);
+      const res = await convertFiles(tool.endpoint, files, submitOptions);
       setResult(res);
       downloadBlob(res.blob, res.filename);
       setStage(STAGE.DONE);
@@ -47,17 +79,21 @@ export default function ToolPage({ tool, onBack }) {
       setError(msg);
       setStage(STAGE.ERROR);
     }
-  }, [files, options, tool.endpoint]);
+  }, [files, options, tool.endpoint, isPageGrid, tool.gridMode, removedPages, pageCount]);
 
   const handleReset = () => {
     setFiles([]);
     setOptions(buildDefaultOptions(tool.options));
+    setRemovedPages(new Set());
+    setRotations(new Map());
+    setPageCount(0);
     setStage(STAGE.UPLOAD);
     setResult(null);
     setError('');
   };
 
-  const canSubmit = files.length > 0 && stage === STAGE.UPLOAD;
+  const canSubmit = files.length > 0 && stage === STAGE.UPLOAD
+    && (!isPageGrid || tool.gridMode !== 'delete' || removedPages.size > 0);
 
   return (
     <div style={{ maxWidth: 640, margin: '0 auto', padding: '32px 16px' }}>
@@ -125,7 +161,22 @@ export default function ToolPage({ tool, onBack }) {
               onChange={setFiles}
             />
 
-            {tool.options.length > 0 && files.length > 0 && (
+            {isPageGrid && files.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <PdfPageGrid
+                  file={files[0]}
+                  mode={tool.gridMode}
+                  removed={removedPages}
+                  onRemovedChange={setRemovedPages}
+                  rotations={rotations}
+                  onRotationsChange={setRotations}
+                  onLoaded={setPageCount}
+                  onError={(msg) => { setError(msg); setStage(STAGE.ERROR); }}
+                />
+              </div>
+            )}
+
+            {!isPageGrid && tool.options.length > 0 && files.length > 0 && (
               <ToolOptionsPanel
                 options={tool.options}
                 values={options}
