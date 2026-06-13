@@ -141,9 +141,9 @@ export default function Home({ onSelectTool }) {
               <span style={{
                 fontSize: 12, color: '#9ca3af', fontWeight: 500,
               }}>
-                {tools.filter(t => t.phase === 1).length} available
-                {tools.filter(t => t.phase > 1).length > 0 &&
-                  ` · ${tools.filter(t => t.phase > 1).length} coming soon`}
+                {tools.filter(t => t.phase <= 2).length} available
+                {tools.filter(t => t.phase > 2).length > 0 &&
+                  ` · ${tools.filter(t => t.phase > 2).length} coming soon`}
               </span>
             </div>
             <ToolGrid tools={tools} onSelect={onSelectTool} />
