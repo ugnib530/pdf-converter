@@ -12,7 +12,7 @@ import { CATEGORIES } from '../config/tools';
 export default function ToolCard({ tool, onClick }) {
   const category = CATEGORIES[tool.category];
   const accent   = category?.color || '#6366f1';
-  const isLive   = tool.phase === 1;
+  const isLive   = tool.phase <= 2;
 
   return (
     <button
