@@ -131,36 +131,6 @@ async def upi_tracker(request: Request, file: UploadFile = File(...)):
         pdf_path.unlink(missing_ok=True)
 
 
-# ── Phase 2 stubs (uncomment + wire service when ready) ──────────────────────
-
-# @router.post("/powerpoint")
-# @limiter.limit(DEFAULT_RATE_LIMIT)
-# async def pdf_to_powerpoint(request: Request, file: UploadFile = File(...)):
-#     """Render each PDF page as a slide image in a PPTX file."""
-#     from services.pdf_to_pptx import convert_pdf_to_pptx
-#     content = await read_and_validate(file, kind="pdf")
-#     ...
-
-# @router.post("/jpg")
-# @limiter.limit(DEFAULT_RATE_LIMIT)
-# async def pdf_to_jpg(request: Request, file: UploadFile = File(...)):
-#     """Render each PDF page as a JPEG; returns a ZIP for multi-page docs."""
-#     from services.pdf_to_images import convert_pdf_to_images
-#     content = await read_and_validate(file, kind="pdf")
-#     ...
-
-# @router.post("/png")
-# @limiter.limit(DEFAULT_RATE_LIMIT)
-# async def pdf_to_png(request: Request, file: UploadFile = File(...)):
-#     """Render each PDF page as a PNG; returns a ZIP for multi-page docs."""
-#     from services.pdf_to_images import convert_pdf_to_images
-#     content = await read_and_validate(file, kind="pdf")
-#     ...
-
-# @router.post("/extract-images")
-# @limiter.limit(DEFAULT_RATE_LIMIT)
-# async def extract_images(request: Request, file: UploadFile = File(...)):
-#     """Extract images embedded in the PDF and return them as a ZIP."""
-#     from services.extract_images import extract_pdf_images
-#     content = await read_and_validate(file, kind="pdf")
-#     ...
+# ── Phase 2 endpoints moved to routers/organize.py and routers/to_pdf.py ─────
+# /tools/jpg, /tools/png, /tools/extract-images  → routers/organize.py
+# /tools/powerpoint                               → routers/to_pdf.py
