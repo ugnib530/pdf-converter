@@ -264,7 +264,7 @@ export const TOOLS = {
       { type: "select", key: "quality", label: "Compression level",
         choices: ["screen", "ebook", "printer", "prepress"], default: "ebook" },
     ],
-    phase: 3,
+    phase: 2,
   },
   "repair-pdf": {
     slug: "repair-pdf",
@@ -276,7 +276,7 @@ export const TOOLS = {
     multiFile: false,
     accept: [".pdf"],
     options: [],
-    phase: 3,
+    phase: 2,
   },
   "flatten-pdf": {
     slug: "flatten-pdf",
@@ -288,7 +288,7 @@ export const TOOLS = {
     multiFile: false,
     accept: [".pdf"],
     options: [],
-    phase: 3,
+    phase: 2,
   },
   "pdf-to-pdfa": {
     slug: "pdf-to-pdfa",
@@ -300,7 +300,7 @@ export const TOOLS = {
     multiFile: false,
     accept: [".pdf"],
     options: [],
-    phase: 3,
+    phase: 2,
   },
 
   // ── Security ────────────────────────────────────────────────────────────────
@@ -345,7 +345,7 @@ export const TOOLS = {
       { type: "text", key: "terms",
         label: "Words / phrases to redact (comma-separated)", required: true },
     ],
-    phase: 3,
+    phase: 2,
   },
 };
 
