@@ -21,6 +21,7 @@ from core.rate_limit import limiter
 
 from services.protect import protect_pdf
 from services.unlock  import unlock_pdf
+from services.redact import redact_pdf
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -104,15 +105,21 @@ async def unlock(
         pdf_path.unlink(missing_ok=True)
 
 
-# ── Redact (Phase 3 stub) ─────────────────────────────────────────────────────
-# @router.post("/redact")
-# @limiter.limit(DEFAULT_RATE_LIMIT)
-# async def redact(
-#     request: Request,
-#     file: UploadFile = File(...),
-#     terms: str = Form(...),   # comma-separated words/phrases to redact
-# ):
-#     """Permanently remove (not just visually cover) specified text from a PDF."""
-#     from services.redact import redact_pdf
-#     content = await read_and_validate(file, kind="pdf")
-#     ...
+
+@router.post("/redact")
+@limiter.limit(DEFAULT_RATE_LIMIT)
+async def redact(request: Request, file: UploadFile = File(...), terms: str = Form(...)):
+    content = await read_and_validate(file, kind="pdf")
+    pdf_path, out_path = temp_path("pdf"), temp_path("pdf")
+    try:
+        pdf_path.write_bytes(content)
+        await redact_pdf(pdf_path, out_path, terms)
+        stem = Path(file.filename or "document").stem
+        return FileResponse(path=str(out_path), media_type="application/pdf", filename=f"{stem}_redacted.pdf")
+    except ValueError as exc:
+        raise api_error(422, str(exc), "NO_MATCHES_FOUND")
+    except Exception as exc:
+        if hasattr(exc, "status_code"): raise
+        raise api_error(500, f"Redaction failed: {exc}", "CONVERSION_ERROR")
+    finally:
+        pdf_path.unlink(missing_ok=True)

@@ -43,3 +43,10 @@ API_OFFICE_URL: str = os.environ.get("API_OFFICE_URL", "")
 # Override if binaries are not on PATH (unlikely on Railway/Docker, but handy locally).
 GS_BIN: str = os.environ.get("GS_BIN", "gs")
 QPDF_BIN: str = os.environ.get("QPDF_BIN", "qpdf")
+_ICC_CANDIDATES = [
+    os.environ.get("ICC_PROFILE_PATH", ""),
+    "/usr/share/color/icc/ghostscript/default_rgb.icc",
+    "/usr/share/ghostscript/icc/srgb.icc",
+    "/usr/local/share/ghostscript/iccprofiles/srgb.icc",
+]
+ICC_PROFILE_PATH: str = next((p for p in _ICC_CANDIDATES if p and Path(p).is_file()), "")
