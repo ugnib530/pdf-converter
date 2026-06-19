@@ -10,23 +10,22 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
+import { getAuth, clearAuth } from '../utils/auth';
 
 export default function TopBar({ onOpenSearch, onMenuClick }) {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [authEmail, setAuthEmail] = useState(null);
 
-  // Pick up the logged-in user on mount and whenever this tab regains focus
   useEffect(() => {
-    const sync = () => setAuthEmail(localStorage.getItem('auth_email'));
+    const sync = () => setAuthEmail(getAuth().email);
     sync();
     window.addEventListener('focus', sync);
     return () => window.removeEventListener('focus', sync);
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('auth_email');
+    clearAuth();
     setAuthEmail(null);
     navigate('/');
   };

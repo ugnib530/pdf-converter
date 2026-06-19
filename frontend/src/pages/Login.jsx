@@ -5,9 +5,8 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+import { setAuth } from '../utils/auth';
+import { API_URL, GOOGLE_CLIENT_ID } from '../config/api';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -19,9 +18,8 @@ export default function Login() {
   const googleButtonRef = useRef(null);
   const navigate = useNavigate();
 
-  const completeLogin = (data) => {
-    localStorage.setItem('auth_token', data.access_token);
-    localStorage.setItem('auth_email', data.email);
+ const completeLogin = (data) => {
+    setAuth(data.access_token, data.email);
     navigate('/');
   };
 
@@ -29,12 +27,24 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    if (!API_URL) {
+      setError('Server not configured. Set VITE_API_URL and redeploy.');
+      setLoading(false);
+      return;
+    }
+    let res;
     try {
-      const res = await fetch(`${API_URL}/auth/${mode}`, {
+      res = await fetch(`${API_URL}/auth/${mode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
+    } catch {
+      setError('Could not reach the server. Check your connection or VITE_API_URL.');
+      setLoading(false);
+      return;
+    }
+    try {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Something went wrong');
       completeLogin(data);
@@ -57,7 +67,7 @@ export default function Login() {
       if (!res.ok) throw new Error(data.detail || 'Google sign-in failed');
       completeLogin(data);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Could not reach the server for Google sign-in.');
     }
   };
 
@@ -87,7 +97,8 @@ export default function Login() {
           renderGoogleButton();
         }
       }, 200);
-      return () => clearInterval(interval);
+      const timeout = setTimeout(() => clearInterval(interval), 8000); // give up after 8s
+      return () => { clearInterval(interval); clearTimeout(timeout); };
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
