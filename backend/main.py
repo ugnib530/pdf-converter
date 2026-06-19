@@ -25,6 +25,7 @@ from routers.organize  import router as organize_router  # Phase 2
 from routers.security  import router as security_router  # Phase 2
 from routers.to_pdf    import router as to_pdf_router    # Phase 2
 from routers.cleanup   import router as cleanup_router  # Phase 3
+from auth import router as auth_router                  # Sign up / Log in
 
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +85,7 @@ app.include_router(organize_router, prefix="/tools", tags=["Organize PDF"])
 app.include_router(security_router, prefix="/tools", tags=["Security"])
 app.include_router(to_pdf_router,   prefix="/tools", tags=["Convert to PDF"])
 app.include_router(cleanup_router,  prefix="/tools", tags=["Edit & Optimize"])
+app.include_router(auth_router)  # already has its own "/auth" prefix
 
 
 # ── Utility routes ────────────────────────────────────────────────────────────
