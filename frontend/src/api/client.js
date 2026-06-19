@@ -13,7 +13,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { API_URL } from '../config/api';
+import { API_URL } from '../config/config';
 const API_CORE   = API_URL;
 const API_OFFICE = import.meta.env.VITE_API_OFFICE_URL || API_CORE;
 

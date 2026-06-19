@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { setAuth } from '../utils/auth';
-import { API_URL, GOOGLE_CLIENT_ID } from '../config/api';
+import { API_URL, GOOGLE_CLIENT_ID } from '../config/config';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
