@@ -7,11 +7,29 @@
  *   onOpenSearch  () => void
  *   onMenuClick   () => void   toggles the mobile sidebar drawer
  */
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 
 export default function TopBar({ onOpenSearch, onMenuClick }) {
   const { theme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
+  const [authEmail, setAuthEmail] = useState(null);
+
+  // Pick up the logged-in user on mount and whenever this tab regains focus
+  useEffect(() => {
+    const sync = () => setAuthEmail(localStorage.getItem('auth_email'));
+    sync();
+    window.addEventListener('focus', sync);
+    return () => window.removeEventListener('focus', sync);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_email');
+    setAuthEmail(null);
+    navigate('/');
+  };
 
   return (
     <header style={{
@@ -101,23 +119,51 @@ export default function TopBar({ onOpenSearch, onMenuClick }) {
           )}
         </button>
 
-        <button
-          style={{
-            background: 'none', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '7px 14px', fontSize: 13.5, fontWeight: 600,
-            color: 'var(--text-2)', cursor: 'pointer',
-          }}
-        >
-          Sign in
-        </button>
+        {authEmail ? (
+          <>
+            <span
+              className="signin-btn-visible"
+              style={{ fontSize: 13.5, color: 'var(--text-2)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {authEmail}
+            </span>
+            <button
+              onClick={handleLogout}
+              style={{
+                background: 'none', border: '1px solid var(--border)', borderRadius: 8,
+                padding: '7px 14px', fontSize: 13.5, fontWeight: 600,
+                color: 'var(--text-2)', cursor: 'pointer',
+              }}
+            >
+              Log out
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="signin-btn-visible"
+              onClick={() => navigate('/login')}
+              style={{
+                background: 'none', border: '1px solid var(--border)', borderRadius: 8,
+                padding: '7px 14px', fontSize: 13.5, fontWeight: 600,
+                color: 'var(--text-2)', cursor: 'pointer',
+              }}
+            >
+              Sign in
+            </button>
 
-        <button style={{
-          background: 'var(--accent)', border: 'none', borderRadius: 8,
-          padding: '8px 16px', fontSize: 13.5, fontWeight: 700,
-          color: '#fff', cursor: 'pointer',
-        }}>
-          Get started free
-        </button>
+            <button
+              onClick={() => navigate('/login?mode=signup')}
+              style={{
+                background: 'var(--accent)', border: 'none', borderRadius: 8,
+                padding: '8px 16px', fontSize: 13.5, fontWeight: 700,
+                color: '#fff', cursor: 'pointer',
+              }}
+            >
+              Get started free
+            </button>
+          </>
+        )}
       </div>
     </header>
   );

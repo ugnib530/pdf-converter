@@ -29,6 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Application code ──────────────────────────────────────────────────────────
 COPY main.py .
+COPY auth.py .
 COPY core/ core/
 COPY routers/ routers/
 COPY services/ services/

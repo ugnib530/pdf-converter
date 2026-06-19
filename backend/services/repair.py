@@ -28,7 +28,7 @@ async def repair_pdf(pdf_path: Path, out_path: Path) -> str:
     except ShellError as exc:
         logger.warning(f"qpdf repair failed, falling back to Ghostscript: {exc}")
     except Exception as exc:
-        logger.warning(f"qpdf repair errored, falling back to Ghostscript: {exc}")
+        logger.warning(f"qpdf repair errored, falling back togit push -u origin main Ghostscript: {exc}")
 
     out_path.unlink(missing_ok=True)
     try:
