@@ -39,10 +39,19 @@ GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
 # Leave empty until api-office is deployed.
 API_OFFICE_URL: str = os.environ.get("API_OFFICE_URL", "")
 
-# ── Ghostscript / qpdf binary paths ──────────────────────────────────────────
+# ── Ghostscript / qpdf / LibreOffice binary paths ────────────────────────────
 # Override if binaries are not on PATH (unlikely on Railway/Docker, but handy locally).
 GS_BIN: str = os.environ.get("GS_BIN", "gs")
 QPDF_BIN: str = os.environ.get("QPDF_BIN", "qpdf")
+SOFFICE_BIN: str = os.environ.get("SOFFICE_BIN", "soffice")
+
+# Max concurrent LibreOffice conversions. LibreOffice is heavy (its own
+# process + a user profile) and a free-tier dyno doesn't have much RAM —
+# keep this at 1 unless you know you have headroom.
+OFFICE_CONVERSION_CONCURRENCY: int = int(
+    os.environ.get("OFFICE_CONVERSION_CONCURRENCY", "1")
+)
+
 _ICC_CANDIDATES = [
     os.environ.get("ICC_PROFILE_PATH", ""),
     "/usr/share/color/icc/ghostscript/default_rgb.icc",
