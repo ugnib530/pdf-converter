@@ -78,17 +78,21 @@ def init_db():
 init_db()
 
 
+import logging
+logger = logging.getLogger(__name__)
+
 # ── Email ─────────────────────────────────────────────────────────────────────
 
 def send_verification_email(email: str, token: str):
-    """Send a verification link via Resend. No-ops silently if RESEND_API_KEY is unset."""
+    """Send a verification link via Resend."""
     if not RESEND_API_KEY:
+        logger.warning("RESEND_API_KEY not set — skipping verification email")
         return
 
     verify_url = f"https://pdf-converter-production-a181.up.railway.app/auth/verify/{token}"
 
     try:
-        httpx.post(
+        resp = httpx.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
             json={
@@ -112,8 +116,12 @@ def send_verification_email(email: str, token: str):
             },
             timeout=10,
         )
-    except Exception:
-        pass  # don't crash signup if email fails
+        if resp.status_code >= 400:
+            logger.error(f"Resend API error {resp.status_code}: {resp.text}")
+        else:
+            logger.info(f"Verification email sent to {email}")
+    except Exception as e:
+        logger.error(f"Failed to send verification email to {email}: {e}")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
