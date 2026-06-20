@@ -70,13 +70,21 @@ app.add_middleware(
 
 
 # ── Global error handler — keeps response shape consistent ───────────────────
+# NOTE: FastAPI exception handlers bypass CORSMiddleware, so we must manually
+# add CORS headers here — otherwise any 500 looks like a CORS error in browsers.
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled exception on {request.url}: {exc}", exc_info=True)
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content={"error": "An unexpected server error occurred.", "code": "INTERNAL_ERROR"},
     )
+    origin = request.headers.get("origin")
+    if origin:
+        if ALLOWED_ORIGINS == ["*"] or origin in ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────
