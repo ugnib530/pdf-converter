@@ -1,12 +1,12 @@
 /**
  * pages/Login.jsx
  * Dedicated sign up / log in page. Supports email+password and Google Sign-In.
- * Visit /login for log in, /login?mode=signup to land on the signup form.
+ * Visit /login for log in, /login?mode=signup to land on the signup form. ezezezez
  */
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { setAuth } from '../utils/auth';
-import { API_URL, GOOGLE_CLIENT_ID } from '../config/api';
+import { API_URL, GOOGLE_CLIENT_ID } from '../config/config';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
