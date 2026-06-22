@@ -14,6 +14,7 @@ Env vars needed:
   GOOGLE_CLIENT_ID  your Google OAuth client ID (optional)
   RESEND_API_KEY    your Resend API key         (optional — skips email if not set)
   APP_URL           your frontend URL           (e.g. https://pdf-converter-eight-rouge.vercel.app)
+  BACKEND_URL       your backend URL            (e.g. https://pdf-converter-production-a181.up.railway.app)
   FROM_EMAIL        verified sender address     (e.g. noreply@yourdomain.com)
 """
 
@@ -40,6 +41,7 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 DB_PATH          = os.environ.get("AUTH_DB_PATH", "users.db")
 RESEND_API_KEY   = os.environ.get("RESEND_API_KEY", "")
 APP_URL          = os.environ.get("APP_URL", "http://localhost:5173")
+BACKEND_URL      = os.environ.get("BACKEND_URL", "http://localhost:8000")
 FROM_EMAIL       = os.environ.get("FROM_EMAIL", "noreply@docshift.app")
 
 pwd_context   = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -89,7 +91,10 @@ def send_verification_email(email: str, token: str):
         logger.warning("RESEND_API_KEY not set — skipping verification email")
         return
 
-    verify_url = f"https://pdf-converter-production-a181.up.railway.app/auth/verify/{token}"
+    # Uses BACKEND_URL (not APP_URL) because this link must hit the backend API,
+    # not the frontend. Set BACKEND_URL in your environment to match wherever
+    # this server is deployed (e.g. https://pdf-converter-production-a181.up.railway.app).
+    verify_url = f"{BACKEND_URL}/auth/verify/{token}"
 
     try:
         resp = httpx.post(
@@ -206,7 +211,7 @@ def verify_email(token: str):
 
     if not row:
         conn.close()
-        return HTMLResponse("""
+        return HTMLResponse(f"""
             <html><body style="font-family:sans-serif;text-align:center;padding:60px">
               <h2>&#10060; Invalid or already used link</h2>
               <p>This verification link is invalid or your account is already verified.</p>
