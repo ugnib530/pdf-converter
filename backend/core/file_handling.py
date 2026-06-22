@@ -9,6 +9,7 @@ Shared utilities for every router:
 import uuid
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -140,8 +141,7 @@ async def cleanup_loop() -> None:
     while True:
         await asyncio.sleep(60)
         try:
-            loop = asyncio.get_event_loop()
-            now = loop.time()
+            now = time.time()  # Unix timestamp — same scale as st_mtime
 
             for item in TEMP_DIR.iterdir():
                 try:

@@ -223,7 +223,7 @@ export const TOOLS = {
     multiFile: false,
     accept: [".docx", ".doc"],
     options: [],
-    phase: 5,
+    phase: 2,
   },
   "excel-to-pdf": {
     slug: "excel-to-pdf",
@@ -235,7 +235,7 @@ export const TOOLS = {
     multiFile: false,
     accept: [".xlsx", ".xls"],
     options: [],
-    phase: 5,
+    phase: 2,
   },
   "powerpoint-to-pdf": {
     slug: "powerpoint-to-pdf",
@@ -247,7 +247,7 @@ export const TOOLS = {
     multiFile: false,
     accept: [".pptx", ".ppt"],
     options: [],
-    phase: 5,
+    phase: 2,
   },
 
   // ── Edit & Optimize ─────────────────────────────────────────────────────────

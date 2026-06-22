@@ -4,8 +4,6 @@ Endpoints that add or remove PDF security.
 
   POST /tools/protect   Add a password (AES-256)
   POST /tools/unlock    Remove a known password
-
-Phase 3 addition (stub below):
   POST /tools/redact    Permanently black out text/areas
 """
 import logging
@@ -13,6 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from typing import Optional
 
 from core.config import DEFAULT_RATE_LIMIT
@@ -21,7 +20,7 @@ from core.rate_limit import limiter
 
 from services.protect import protect_pdf
 from services.unlock  import unlock_pdf
-from services.redact import redact_pdf
+from services.redact  import redact_pdf
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -55,14 +54,17 @@ async def protect(
             path=str(out_path),
             media_type="application/pdf",
             filename=f"{stem}_protected.pdf",
+            background=BackgroundTask(out_path.unlink, missing_ok=True),
         )
     except ValueError as exc:
+        out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "PROTECT_ERROR")
     except Exception as exc:
+        out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
         logger.error(f"Protect failed: {exc}")
-        raise api_error(500, f"Protection failed: {exc}", "CONVERSION_ERROR")
+        raise api_error(500, "Protection failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
 
@@ -93,33 +95,53 @@ async def unlock(
             path=str(out_path),
             media_type="application/pdf",
             filename=f"{stem}_unlocked.pdf",
+            background=BackgroundTask(out_path.unlink, missing_ok=True),
         )
     except ValueError as exc:
+        out_path.unlink(missing_ok=True)
         raise api_error(403, str(exc), "WRONG_PASSWORD")
     except Exception as exc:
+        out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
         logger.error(f"Unlock failed: {exc}")
-        raise api_error(500, f"Unlock failed: {exc}", "CONVERSION_ERROR")
+        raise api_error(500, "Unlock failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
 
 
-
+# ── Redact ────────────────────────────────────────────────────────────────────
 @router.post("/redact")
 @limiter.limit(DEFAULT_RATE_LIMIT)
-async def redact(request: Request, file: UploadFile = File(...), terms: str = Form(...)):
-    content = await read_and_validate(file, kind="pdf")
-    pdf_path, out_path = temp_path("pdf"), temp_path("pdf")
+async def redact(
+    request: Request,
+    file: UploadFile = File(...),
+    terms: str = Form(...),
+):
+    """Permanently black out all occurrences of the specified terms."""
+    content  = await read_and_validate(file, kind="pdf")
+    pdf_path = temp_path("pdf")
+    out_path = temp_path("pdf")
+
     try:
         pdf_path.write_bytes(content)
         await redact_pdf(pdf_path, out_path, terms)
+
         stem = Path(file.filename or "document").stem
-        return FileResponse(path=str(out_path), media_type="application/pdf", filename=f"{stem}_redacted.pdf")
+        return FileResponse(
+            path=str(out_path),
+            media_type="application/pdf",
+            filename=f"{stem}_redacted.pdf",
+            background=BackgroundTask(out_path.unlink, missing_ok=True),
+        )
     except ValueError as exc:
+        out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "NO_MATCHES_FOUND")
     except Exception as exc:
-        if hasattr(exc, "status_code"): raise
-        raise api_error(500, f"Redaction failed: {exc}", "CONVERSION_ERROR")
+        out_path.unlink(missing_ok=True)
+        if hasattr(exc, "status_code"):
+            raise
+        logger.error(f"Redact failed: {exc}")
+        raise api_error(500, "Redaction failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)

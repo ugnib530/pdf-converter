@@ -19,6 +19,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from core.config import DEFAULT_RATE_LIMIT, HEAVY_RATE_LIMIT, GEMINI_API_KEY
 from core.file_handling import read_and_validate, temp_path, api_error
@@ -55,12 +56,14 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...)):
             path=str(docx_path),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=f"{stem}.docx",
+            background=BackgroundTask(docx_path.unlink, missing_ok=True),
         )
     except Exception as exc:
+        docx_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
         logger.error(f"PDF→DOCX failed: {exc}")
-        raise api_error(500, f"Conversion failed: {exc}", "CONVERSION_ERROR")
+        raise api_error(500, "Conversion failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
 
@@ -85,12 +88,14 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...)):
             path=str(xlsx_path),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=f"{stem}.xlsx",
+            background=BackgroundTask(xlsx_path.unlink, missing_ok=True),
         )
     except Exception as exc:
+        xlsx_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
         logger.error(f"PDF→XLSX failed: {exc}")
-        raise api_error(500, f"Conversion failed: {exc}", "CONVERSION_ERROR")
+        raise api_error(500, "Conversion failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
 
@@ -121,12 +126,14 @@ async def upi_tracker(request: Request, file: UploadFile = File(...)):
             path=str(xlsx_path),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=f"{stem}_upi_spending.xlsx",
+            background=BackgroundTask(xlsx_path.unlink, missing_ok=True),
         )
     except Exception as exc:
+        xlsx_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
         logger.error(f"UPI Tracker failed: {exc}")
-        raise api_error(500, f"Processing failed: {exc}", "CONVERSION_ERROR")
+        raise api_error(500, "Processing failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
 
