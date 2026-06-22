@@ -7,6 +7,7 @@ Add new routers here as you complete each Phase.
 """
 import asyncio
 import logging
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +33,21 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# Regex that covers every Vercel preview deployment for this project.
+# Production URL is handled by ALLOWED_ORIGINS (from core/config.py via APP_URL env var).
+VERCEL_PREVIEW_ORIGIN_RE = re.compile(r"https://pdf-converter-.*\.vercel\.app")
+
+
+def _origin_allowed(origin: str) -> bool:
+    """Return True if the origin is in ALLOWED_ORIGINS or matches the Vercel preview regex."""
+    if ALLOWED_ORIGINS == ["*"]:
+        return True
+    if origin in ALLOWED_ORIGINS:
+        return True
+    if VERCEL_PREVIEW_ORIGIN_RE.fullmatch(origin):
+        return True
+    return False
 
 
 # ── Lifespan: start background cleanup task ───────────────────────────────────
@@ -63,6 +79,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://pdf-converter-.*\.vercel\.app",  # all Vercel preview URLs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,10 +97,9 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"error": "An unexpected server error occurred.", "code": "INTERNAL_ERROR"},
     )
     origin = request.headers.get("origin")
-    if origin:
-        if ALLOWED_ORIGINS == ["*"] or origin in ALLOWED_ORIGINS:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+    if origin and _origin_allowed(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
     return response
 
 
@@ -115,3 +131,5 @@ async def list_tools():
         and r.path.startswith("/tools/")
     ]
     return {"tools": sorted(routes)}
+
+# end
