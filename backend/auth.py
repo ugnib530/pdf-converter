@@ -289,3 +289,5 @@ def google_login(data: GoogleLoginRequest):
 @router.get("/me")
 def me(current_user: str = Depends(get_current_user)):
     return {"email": current_user}
+
+# END
