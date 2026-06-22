@@ -15,6 +15,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
   const googleButtonRef = useRef(null);
   const navigate = useNavigate();
 
@@ -47,7 +48,11 @@ export default function Login() {
     try {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Something went wrong');
-      completeLogin(data);
+      if (data.message) {
+        setVerificationSent(true);
+      } else {
+        completeLogin(data);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -119,6 +124,24 @@ export default function Login() {
           </span>
         </Link>
 
+        {verificationSent ? (
+          <div style={styles.verifyBox}>
+            <div style={styles.verifyIcon}>✉️</div>
+            <h2 style={styles.verifyHeading}>Check your email</h2>
+            <p style={styles.verifyText}>
+              We sent a verification link to <strong>{email}</strong>.
+              Click it to activate your account, then come back to log in.
+            </p>
+            <p style={styles.verifyText}>Didn't get it? Check your spam folder.</p>
+            <button
+              style={{ ...styles.submitButton, marginTop: 16 }}
+              onClick={() => { setVerificationSent(false); setMode('login'); setError(''); }}
+            >
+              Go to login
+            </button>
+          </div>
+        ) : (
+          <>
         <h1 style={styles.heading}>{mode === 'login' ? 'Log in' : 'Create your account'}</h1>
 
         {GOOGLE_CLIENT_ID && (
@@ -167,6 +190,8 @@ export default function Login() {
         >
           {mode === 'login' ? "Need an account? Sign up" : 'Already have an account? Log in'}
         </p>
+          </>
+        )}
       </div>
     </div>
   );
@@ -233,4 +258,8 @@ const styles = {
     fontSize: 13,
     textAlign: 'center',
   },
+  verifyBox: { textAlign: 'center', padding: '8px 0' },
+  verifyIcon: { fontSize: 48, marginBottom: 12 },
+  verifyHeading: { margin: '0 0 12px', fontSize: 20, color: 'var(--text)' },
+  verifyText: { fontSize: 14, color: 'var(--subtle)', lineHeight: 1.6, margin: '0 0 8px' },
 };
