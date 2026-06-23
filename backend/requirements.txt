@@ -5,6 +5,9 @@ python-multipart==0.0.9
 slowapi==0.1.9
 aiofiles==23.2.1
 
+# ── Database ──────────────────────────────────────────────────────────────────
+psycopg2-binary==2.9.9
+
 # ── Phase 1: existing converters ──────────────────────────────────────────────
 pdf2docx==0.5.8
 pdfplumber==0.11.1
@@ -19,6 +22,8 @@ pikepdf>=9.0               # protect, unlock, flatten  (pulls in qpdf)
 PyMuPDF>=1.24              # extract-images, redact, pdf-to-jpg/png
 img2pdf>=0.5               # jpg/png → pdf (lossless)
 python-pptx>=1.0          # pdf-to-pptx (page-as-image approach)
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
 pyjwt==2.8.0
 passlib[bcrypt]==1.7.4
 bcrypt==3.2.2
