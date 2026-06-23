@@ -29,8 +29,8 @@ IMAGE_MAGICS: dict[str, bytes] = {
     "webp": b"RIFF",   # RIFF....WEBP — checked separately below
 }
 ACCEPTED_EXTENSIONS: dict[str, set[str]] = {
-    "pdf":   {".pdf"},
-    "image": {".jpg", ".jpeg", ".png", ".gif", ".webp"},
+    "pdf":    {".pdf"},
+    "image":  {".jpg", ".jpeg", ".png", ".gif", ".webp"},
     "office": {".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt", ".odt", ".ods", ".odp"},
 }
 
@@ -54,17 +54,24 @@ async def read_and_validate(
     kind: Literal["pdf", "image", "office", "any"] = "pdf",
 ) -> bytes:
     """
-    Read the entire upload into memory and validate it.
+    Read the upload into memory and validate it.
     Returns raw bytes on success; raises HTTPException on failure.
+
+    We read at most MAX_FILE_SIZE_BYTES + 1 bytes.  If we get that many bytes
+    back we know the file exceeds the limit without having to load the whole
+    thing first — this prevents OOM from clients that omit or spoof the
+    Content-Length header (the middleware catches declared-size violations
+    earlier, but this is the hard byte-level enforcement).
 
     Args:
         file:  The FastAPI UploadFile.
         kind:  Which category to validate against.
                "any" skips extension/magic checks (use with caution).
     """
-    content = await file.read()
+    # Read one byte beyond the limit so we can detect oversized files
+    # without buffering everything into memory first.
+    content = await file.read(MAX_FILE_SIZE_BYTES + 1)
 
-    # Size check — always
     if len(content) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
             413,
@@ -107,7 +114,6 @@ def _check_pdf_magic(content: bytes, filename: str) -> None:
 
 def _check_image_magic(content: bytes, suffix: str) -> None:
     if suffix == ".webp":
-        # WEBP: starts with RIFF, bytes 8-12 must be WEBP
         if not (content[:4] == b"RIFF" and content[8:12] == b"WEBP"):
             raise HTTPException(400, "File is not a valid WebP image.")
         return
@@ -141,7 +147,7 @@ async def cleanup_loop() -> None:
     while True:
         await asyncio.sleep(60)
         try:
-            now = time.time()  # Unix timestamp — same scale as st_mtime
+            now = time.time()
 
             for item in TEMP_DIR.iterdir():
                 try:
@@ -152,12 +158,10 @@ async def cleanup_loop() -> None:
                         item.unlink(missing_ok=True)
                         logger.debug(f"Cleaned up file: {item.name}")
                     elif item.is_dir():
-                        # Only remove if the directory is now empty
                         if not any(item.iterdir()):
                             item.rmdir()
                             logger.debug(f"Cleaned up empty dir: {item.name}")
                         else:
-                            # Clean files inside first; dir removed on next pass
                             for child in item.iterdir():
                                 child_age = now - child.stat().st_mtime
                                 if child_age > CLEANUP_AFTER_SECONDS:

@@ -10,7 +10,7 @@ Adds:
 
 Env vars needed:
   DATABASE_URL      Supabase Postgres connection string
-  JWT_SECRET        secret for signing tokens   (default: dev-secret-change-me)
+  JWT_SECRET        secret for signing tokens   (REQUIRED — no default; app crashes on startup if missing)
   GOOGLE_CLIENT_ID  your Google OAuth client ID (optional)
   RESEND_API_KEY    your Resend API key         (optional — skips email if not set)
   APP_URL           your frontend URL           (e.g. https://pdf-converter-eight-rouge.vercel.app)
@@ -60,7 +60,12 @@ from core.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
-SECRET_KEY                  = os.environ.get("JWT_SECRET", "dev-secret-change-me")
+# JWT_SECRET is REQUIRED. Using os.environ[] (not .get()) means the application
+# will raise a KeyError and refuse to start if the variable is missing — which
+# is the correct behaviour; a missing secret would silently fall back to a weak
+# default and sign tokens that any attacker who knows the default can forge.
+SECRET_KEY: str = os.environ["JWT_SECRET"]
+
 ALGORITHM                   = "HS256"
 TOKEN_EXPIRE_SECONDS        = 60 * 60 * 24 * 7  # 7 days
 VERIFICATION_EXPIRE_SECONDS = 60 * 60 * 24      # 24 hours
@@ -80,7 +85,6 @@ MAX_LOGIN_ATTEMPTS = int(os.environ.get("MAX_LOGIN_ATTEMPTS", "5"))
 LOCKOUT_SECONDS    = int(os.environ.get("LOCKOUT_SECONDS", str(15 * 60)))  # 15 minutes
 
 # ── Rate limit strings ────────────────────────────────────────────────────────
-# Override via env vars if needed (e.g. LOGIN_RATE_LIMIT=10/minute)
 LOGIN_RATE_LIMIT  = os.environ.get("LOGIN_RATE_LIMIT",  "5/15 minutes")
 SIGNUP_RATE_LIMIT = os.environ.get("SIGNUP_RATE_LIMIT", "5/15 minutes")
 GOOGLE_RATE_LIMIT = os.environ.get("GOOGLE_RATE_LIMIT", "10/minute")
@@ -101,7 +105,6 @@ def init_db():
     """Create the users table if it doesn't exist, and migrate existing tables."""
     conn = get_conn()
     with conn.cursor() as cur:
-        # Create table with all columns (new deployments)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id                       SERIAL PRIMARY KEY,
@@ -116,7 +119,6 @@ def init_db():
                 locked_until             DOUBLE PRECISION
             )
         """)
-        # Safe migrations — ADD COLUMN IF NOT EXISTS is idempotent
         for ddl in [
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at DOUBLE PRECISION",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0",
@@ -232,7 +234,6 @@ def signup(request: Request, data: SignupRequest):
             password_hash           = pwd_context.hash(data.password[:72])
             verification_token      = secrets.token_urlsafe(32)
             verification_expires_at = time.time() + VERIFICATION_EXPIRE_SECONDS
-            # If no email service configured, auto-verify so the app stays usable
             is_verified             = False if RESEND_API_KEY else True
 
             cur.execute(
@@ -277,7 +278,6 @@ def verify_email(token: str):
                     </body></html>
                 """, status_code=400)
 
-            # Check expiry — clear the token and let them re-signup with the same email
             if row["verification_expires_at"] and time.time() > row["verification_expires_at"]:
                 cur.execute(
                     """UPDATE users
@@ -330,11 +330,9 @@ def login(request: Request, data: LoginRequest):
         with conn.cursor() as cur:
             row = _get_user_row(cur, data.email)
 
-            # Unknown email — fail generically (don't reveal whether email exists)
             if not row or row["provider"] != "local" or not row["password_hash"]:
                 raise HTTPException(status_code=401, detail="Invalid email or password")
 
-            # ── Lockout check ─────────────────────────────────────────────────
             locked_until = row["locked_until"]
             if locked_until and time.time() < locked_until:
                 retry_in = math.ceil(locked_until - time.time())
@@ -348,9 +346,7 @@ def login(request: Request, data: LoginRequest):
                     ),
                 )
 
-            # ── Password check ────────────────────────────────────────────────
             if not pwd_context.verify(data.password[:72], row["password_hash"]):
-                # Increment failure counter; lock if threshold reached
                 new_count = (row["failed_login_count"] or 0) + 1
                 if new_count >= MAX_LOGIN_ATTEMPTS:
                     cur.execute(
@@ -383,14 +379,12 @@ def login(request: Request, data: LoginRequest):
                         ),
                     )
 
-            # ── Unverified check ──────────────────────────────────────────────
             if not row["is_verified"]:
                 raise HTTPException(
                     status_code=403,
                     detail="Please verify your email before logging in.",
                 )
 
-            # ── Success — reset lockout counters ──────────────────────────────
             cur.execute(
                 "UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE email = %s",
                 (data.email,),
@@ -434,7 +428,6 @@ def google_login(request: Request, data: GoogleLoginRequest):
     finally:
         conn.close()
 
-    # Google accounts are auto-verified — Google already confirmed the email
     token = create_token(email)
     return {"access_token": token, "token_type": "bearer", "email": email}
 
@@ -442,5 +435,3 @@ def google_login(request: Request, data: GoogleLoginRequest):
 @router.get("/me")
 def me(current_user: str = Depends(get_current_user)):
     return {"email": current_user}
-
-# END
