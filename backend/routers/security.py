@@ -8,14 +8,12 @@ Endpoints that add or remove PDF security.
 """
 import logging
 from pathlib import Path
-
-from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
 from typing import Optional
 
+from fastapi import APIRouter, File, Form, Request, UploadFile
+
 from core.config import DEFAULT_RATE_LIMIT
-from core.file_handling import read_and_validate, temp_path, api_error
+from core.file_handling import read_and_validate, temp_path, api_error, storage_response
 from core.rate_limit import limiter
 
 from services.protect import protect_pdf
@@ -50,12 +48,7 @@ async def protect(
         await protect_pdf(pdf_path, out_path, password)
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(out_path),
-            media_type="application/pdf",
-            filename=f"{stem}_protected.pdf",
-            background=BackgroundTask(out_path.unlink, missing_ok=True),
-        )
+        return await storage_response(out_path, f"{stem}_protected.pdf", "application/pdf")
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "PROTECT_ERROR")
@@ -63,7 +56,7 @@ async def protect(
         out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Protect failed: {exc}")
+        logger.error("Protect failed: %s", exc)
         raise api_error(500, "Protection failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -91,12 +84,7 @@ async def unlock(
         await unlock_pdf(pdf_path, out_path, password or "")
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(out_path),
-            media_type="application/pdf",
-            filename=f"{stem}_unlocked.pdf",
-            background=BackgroundTask(out_path.unlink, missing_ok=True),
-        )
+        return await storage_response(out_path, f"{stem}_unlocked.pdf", "application/pdf")
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(403, str(exc), "WRONG_PASSWORD")
@@ -104,7 +92,7 @@ async def unlock(
         out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Unlock failed: {exc}")
+        logger.error("Unlock failed: %s", exc)
         raise api_error(500, "Unlock failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -128,12 +116,7 @@ async def redact(
         await redact_pdf(pdf_path, out_path, terms)
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(out_path),
-            media_type="application/pdf",
-            filename=f"{stem}_redacted.pdf",
-            background=BackgroundTask(out_path.unlink, missing_ok=True),
-        )
+        return await storage_response(out_path, f"{stem}_redacted.pdf", "application/pdf")
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "NO_MATCHES_FOUND")
@@ -141,7 +124,7 @@ async def redact(
         out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Redact failed: {exc}")
+        logger.error("Redact failed: %s", exc)
         raise api_error(500, "Redaction failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)

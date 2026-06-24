@@ -14,15 +14,12 @@ Phase 2 additions (stubs below, uncomment when services are ready):
   POST /tools/extract-images PDF embedded images → ZIP
 """
 import logging
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, File, Request, UploadFile
-from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
 
 from core.config import DEFAULT_RATE_LIMIT, HEAVY_RATE_LIMIT, GEMINI_API_KEY
-from core.file_handling import read_and_validate, temp_path, api_error
+from core.file_handling import read_and_validate, temp_path, api_error, storage_response
 from core.rate_limit import limiter
 
 from services.pdf_to_word import convert_pdf_to_word
@@ -38,13 +35,13 @@ router = APIRouter()
 @limiter.limit(DEFAULT_RATE_LIMIT)
 async def pdf_to_word(request: Request, file: UploadFile = File(...)):
     """Convert a PDF to an editable Word document (.docx)."""
-    content = await read_and_validate(file, kind="pdf")
-    pdf_path = temp_path("pdf")
+    content  = await read_and_validate(file, kind="pdf")
+    pdf_path  = temp_path("pdf")
     docx_path = temp_path("docx")
 
     try:
         pdf_path.write_bytes(content)
-        logger.info(f"PDF→DOCX: {file.filename} ({len(content):,} bytes)")
+        logger.info("PDF→DOCX: %s (%d bytes)", file.filename, len(content))
 
         await convert_pdf_to_word(pdf_path, docx_path)
 
@@ -52,17 +49,16 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...)):
             raise api_error(500, "Conversion produced an empty file.", "EMPTY_OUTPUT")
 
         stem = Path(file.filename or "output").stem
-        return FileResponse(
-            path=str(docx_path),
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename=f"{stem}.docx",
-            background=BackgroundTask(docx_path.unlink, missing_ok=True),
+        return await storage_response(
+            docx_path,
+            f"{stem}.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
     except Exception as exc:
         docx_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"PDF→DOCX failed: {exc}")
+        logger.error("PDF→DOCX failed: %s", exc)
         raise api_error(500, "Conversion failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -73,28 +69,27 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...)):
 @limiter.limit(DEFAULT_RATE_LIMIT)
 async def pdf_to_excel(request: Request, file: UploadFile = File(...)):
     """Extract tables from a PDF and place them in an Excel workbook (.xlsx)."""
-    content = await read_and_validate(file, kind="pdf")
-    pdf_path = temp_path("pdf")
+    content   = await read_and_validate(file, kind="pdf")
+    pdf_path  = temp_path("pdf")
     xlsx_path = temp_path("xlsx")
 
     try:
         pdf_path.write_bytes(content)
-        logger.info(f"PDF→XLSX: {file.filename} ({len(content):,} bytes)")
+        logger.info("PDF→XLSX: %s (%d bytes)", file.filename, len(content))
 
         await convert_pdf_to_excel(pdf_path, xlsx_path)
 
         stem = Path(file.filename or "output").stem
-        return FileResponse(
-            path=str(xlsx_path),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=f"{stem}.xlsx",
-            background=BackgroundTask(xlsx_path.unlink, missing_ok=True),
+        return await storage_response(
+            xlsx_path,
+            f"{stem}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except Exception as exc:
         xlsx_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"PDF→XLSX failed: {exc}")
+        logger.error("PDF→XLSX failed: %s", exc)
         raise api_error(500, "Conversion failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -111,28 +106,27 @@ async def upi_tracker(request: Request, file: UploadFile = File(...)):
     if not GEMINI_API_KEY:
         raise api_error(503, "UPI Tracker is not configured on this server.", "SERVICE_UNAVAILABLE")
 
-    content = await read_and_validate(file, kind="pdf")
-    pdf_path = temp_path("pdf")
+    content   = await read_and_validate(file, kind="pdf")
+    pdf_path  = temp_path("pdf")
     xlsx_path = temp_path("xlsx")
 
     try:
         pdf_path.write_bytes(content)
-        logger.info(f"UPI Tracker: {file.filename} ({len(content):,} bytes)")
+        logger.info("UPI Tracker: %s (%d bytes)", file.filename, len(content))
 
         await run_upi_tracker(pdf_path, xlsx_path, content, GEMINI_API_KEY)
 
         stem = Path(file.filename or "statement").stem
-        return FileResponse(
-            path=str(xlsx_path),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=f"{stem}_upi_spending.xlsx",
-            background=BackgroundTask(xlsx_path.unlink, missing_ok=True),
+        return await storage_response(
+            xlsx_path,
+            f"{stem}_upi_spending.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except Exception as exc:
         xlsx_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"UPI Tracker failed: {exc}")
+        logger.error("UPI Tracker failed: %s", exc)
         raise api_error(500, "Processing failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)

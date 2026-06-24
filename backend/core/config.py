@@ -6,7 +6,9 @@ so nothing is hard-coded between dev / Railway / prod.
 import os
 from pathlib import Path
 
-# ── Temp storage ──────────────────────────────────────────────────────────────
+# ── Temp storage (used ONLY during active processing, not for persistence) ────
+# Output files are uploaded to Supabase Storage immediately after conversion
+# and deleted from disk — this directory is only for in-flight work.
 TEMP_DIR = Path(os.environ.get("TEMP_DIR", "/tmp/docshift"))
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -15,7 +17,7 @@ MAX_FILE_SIZE_MB: int = int(os.environ.get("MAX_FILE_SIZE_MB", "50"))
 MAX_FILE_SIZE_BYTES: int = MAX_FILE_SIZE_MB * 1024 * 1024
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
-# How long (seconds) before a temp file is eligible for deletion.
+# How long (seconds) before a temp file / Supabase object is eligible for deletion.
 CLEANUP_AFTER_SECONDS: int = int(os.environ.get("CLEANUP_AFTER_SECONDS", "300"))
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
@@ -59,3 +61,17 @@ _ICC_CANDIDATES = [
     "/usr/local/share/ghostscript/iccprofiles/srgb.icc",
 ]
 ICC_PROFILE_PATH: str = next((p for p in _ICC_CANDIDATES if p and Path(p).is_file()), "")
+
+# ── Supabase Storage ──────────────────────────────────────────────────────────
+# Required in production. When unset, output files fall back to being served
+# directly from local disk (fine for local dev, NOT safe for production).
+#
+#   SUPABASE_URL              — e.g. https://<project>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY — service-role JWT (never expose to clients)
+#   SUPABASE_STORAGE_BUCKET   — bucket name, default "pdf-outputs"
+#
+# The bucket must exist in your Supabase project before deployment.
+# Run:  supabase storage create-bucket pdf-outputs --public=false
+SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_STORAGE_BUCKET: str = os.environ.get("SUPABASE_STORAGE_BUCKET", "pdf-outputs")

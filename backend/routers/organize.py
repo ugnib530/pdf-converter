@@ -7,19 +7,17 @@ Endpoints that reorganise or transform the structure of a PDF.
   POST /tools/delete-pages    Remove specific pages
   POST /tools/rotate          Rotate one or all pages
   POST /tools/extract-images  Pull embedded images out (ZIP)
-  POST /tools/jpg             Render pages as JPEGs (ZIP or single image)
-  POST /tools/png             Render pages as PNGs  (ZIP or single image)
+  POST /tools/jpg             Render pages as JPEGs (ZIP)
+  POST /tools/png             Render pages as PNGs  (ZIP)
 """
 import logging
 from pathlib import Path
-
-from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
 from typing import List, Optional
 
+from fastapi import APIRouter, File, Form, Request, UploadFile
+
 from core.config import DEFAULT_RATE_LIMIT
-from core.file_handling import read_and_validate, temp_path, api_error
+from core.file_handling import read_and_validate, temp_path, api_error, storage_response
 from core.rate_limit import limiter
 
 from services.merge          import merge_pdfs
@@ -53,17 +51,12 @@ async def merge(request: Request, files: List[UploadFile] = File(...)):
 
         await merge_pdfs(pdf_paths, out_path)
 
-        return FileResponse(
-            path=str(out_path),
-            media_type="application/pdf",
-            filename="merged.pdf",
-            background=BackgroundTask(out_path.unlink, missing_ok=True),
-        )
+        return await storage_response(out_path, "merged.pdf", "application/pdf")
     except Exception as exc:
         out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Merge failed: {exc}")
+        logger.error("Merge failed: %s", exc)
         raise api_error(500, "Merge failed.", "CONVERSION_ERROR")
     finally:
         for p in pdf_paths:
@@ -91,11 +84,10 @@ async def split(
         count = await split_pdf(pdf_path, zip_path, ranges or "")
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(zip_path),
-            media_type="application/zip",
-            filename=f"{stem}_split_{count}parts.zip",
-            background=BackgroundTask(zip_path.unlink, missing_ok=True),
+        return await storage_response(
+            zip_path,
+            f"{stem}_split_{count}parts.zip",
+            "application/zip",
         )
     except ValueError as exc:
         zip_path.unlink(missing_ok=True)
@@ -104,7 +96,7 @@ async def split(
         zip_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Split failed: {exc}")
+        logger.error("Split failed: %s", exc)
         raise api_error(500, "Split failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -131,12 +123,7 @@ async def delete_pages_endpoint(
         await delete_pages(pdf_path, out_path, pages)
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(out_path),
-            media_type="application/pdf",
-            filename=f"{stem}_edited.pdf",
-            background=BackgroundTask(out_path.unlink, missing_ok=True),
-        )
+        return await storage_response(out_path, f"{stem}_edited.pdf", "application/pdf")
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "INVALID_PAGE_RANGE")
@@ -144,7 +131,7 @@ async def delete_pages_endpoint(
         out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Delete pages failed: {exc}")
+        logger.error("Delete pages failed: %s", exc)
         raise api_error(500, "Delete pages failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -172,12 +159,7 @@ async def rotate(
         await rotate_pdf(pdf_path, out_path, angle, pages or "")
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(out_path),
-            media_type="application/pdf",
-            filename=f"{stem}_rotated.pdf",
-            background=BackgroundTask(out_path.unlink, missing_ok=True),
-        )
+        return await storage_response(out_path, f"{stem}_rotated.pdf", "application/pdf")
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "INVALID_PAGE_RANGE")
@@ -185,7 +167,7 @@ async def rotate(
         out_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Rotate failed: {exc}")
+        logger.error("Rotate failed: %s", exc)
         raise api_error(500, "Rotate failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -205,11 +187,10 @@ async def extract_images(request: Request, file: UploadFile = File(...)):
         count = await extract_pdf_images(pdf_path, zip_path)
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(zip_path),
-            media_type="application/zip",
-            filename=f"{stem}_images_{count}.zip",
-            background=BackgroundTask(zip_path.unlink, missing_ok=True),
+        return await storage_response(
+            zip_path,
+            f"{stem}_images_{count}.zip",
+            "application/zip",
         )
     except ValueError as exc:
         zip_path.unlink(missing_ok=True)
@@ -218,7 +199,7 @@ async def extract_images(request: Request, file: UploadFile = File(...)):
         zip_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"Extract images failed: {exc}")
+        logger.error("Extract images failed: %s", exc)
         raise api_error(500, "Extraction failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -243,20 +224,19 @@ async def pdf_to_jpg(
 
     try:
         pdf_path.write_bytes(content)
-        count = await pdf_to_images(pdf_path, zip_path, fmt="jpg", dpi=dpi)
+        await pdf_to_images(pdf_path, zip_path, fmt="jpg", dpi=dpi)
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(zip_path),
-            media_type="application/zip",
-            filename=f"{stem}_images.zip",
-            background=BackgroundTask(zip_path.unlink, missing_ok=True),
+        return await storage_response(
+            zip_path,
+            f"{stem}_images.zip",
+            "application/zip",
         )
     except Exception as exc:
         zip_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"PDF→JPG failed: {exc}")
+        logger.error("PDF→JPG failed: %s", exc)
         raise api_error(500, "Conversion failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
@@ -281,20 +261,19 @@ async def pdf_to_png(
 
     try:
         pdf_path.write_bytes(content)
-        count = await pdf_to_images(pdf_path, zip_path, fmt="png", dpi=dpi)
+        await pdf_to_images(pdf_path, zip_path, fmt="png", dpi=dpi)
 
         stem = Path(file.filename or "document").stem
-        return FileResponse(
-            path=str(zip_path),
-            media_type="application/zip",
-            filename=f"{stem}_images.zip",
-            background=BackgroundTask(zip_path.unlink, missing_ok=True),
+        return await storage_response(
+            zip_path,
+            f"{stem}_images.zip",
+            "application/zip",
         )
     except Exception as exc:
         zip_path.unlink(missing_ok=True)
         if hasattr(exc, "status_code"):
             raise
-        logger.error(f"PDF→PNG failed: {exc}")
+        logger.error("PDF→PNG failed: %s", exc)
         raise api_error(500, "Conversion failed.", "CONVERSION_ERROR")
     finally:
         pdf_path.unlink(missing_ok=True)
