@@ -5,15 +5,33 @@ Endpoints that add or remove PDF security.
   POST /tools/protect   Add a password (AES-256)
   POST /tools/unlock    Remove a known password
   POST /tools/redact    Permanently black out text/areas
+
+SECURITY
+  • File Ownership:   Every endpoint requires a valid JWT via
+    get_current_user_id(). The returned user_id is passed into
+    storage_response() so that all Supabase objects are namespaced under
+    outputs/{user_id}/… and can never be accessed by another user.
+  • Filename Sanitization: safe_download_name() strips unsafe characters
+    from user-supplied filenames before they appear in Content-Disposition
+    headers. The internal storage key is always a UUID.
+  • MIME Validation: read_and_validate(kind="pdf") checks the %PDF magic
+    bytes in addition to the file extension.
 """
 import logging
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
+from auth import get_current_user_id
 from core.config import DEFAULT_RATE_LIMIT
-from core.file_handling import read_and_validate, temp_path, api_error, storage_response
+from core.file_handling import (
+    read_and_validate,
+    temp_path,
+    api_error,
+    storage_response,
+    safe_download_name,
+)
 from core.rate_limit import limiter
 
 from services.protect import protect_pdf
@@ -31,6 +49,7 @@ async def protect(
     request: Request,
     file: UploadFile = File(...),
     password: str = Form(...),
+    user_id: int = Depends(get_current_user_id),
 ):
     """
     Encrypt a PDF with AES-256 using the provided password.
@@ -47,8 +66,13 @@ async def protect(
         pdf_path.write_bytes(content)
         await protect_pdf(pdf_path, out_path, password)
 
-        stem = Path(file.filename or "document").stem
-        return await storage_response(out_path, f"{stem}_protected.pdf", "application/pdf")
+        stem = safe_download_name(file.filename or "", fallback="document")
+        return await storage_response(
+            out_path,
+            f"{stem}_protected.pdf",
+            "application/pdf",
+            user_id=user_id,
+        )
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "PROTECT_ERROR")
@@ -69,6 +93,7 @@ async def unlock(
     request: Request,
     file: UploadFile = File(...),
     password: Optional[str] = Form(""),
+    user_id: int = Depends(get_current_user_id),
 ):
     """
     Remove encryption from a PDF.
@@ -83,8 +108,13 @@ async def unlock(
         pdf_path.write_bytes(content)
         await unlock_pdf(pdf_path, out_path, password or "")
 
-        stem = Path(file.filename or "document").stem
-        return await storage_response(out_path, f"{stem}_unlocked.pdf", "application/pdf")
+        stem = safe_download_name(file.filename or "", fallback="document")
+        return await storage_response(
+            out_path,
+            f"{stem}_unlocked.pdf",
+            "application/pdf",
+            user_id=user_id,
+        )
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(403, str(exc), "WRONG_PASSWORD")
@@ -105,6 +135,7 @@ async def redact(
     request: Request,
     file: UploadFile = File(...),
     terms: str = Form(...),
+    user_id: int = Depends(get_current_user_id),
 ):
     """Permanently black out all occurrences of the specified terms."""
     content  = await read_and_validate(file, kind="pdf")
@@ -115,8 +146,13 @@ async def redact(
         pdf_path.write_bytes(content)
         await redact_pdf(pdf_path, out_path, terms)
 
-        stem = Path(file.filename or "document").stem
-        return await storage_response(out_path, f"{stem}_redacted.pdf", "application/pdf")
+        stem = safe_download_name(file.filename or "", fallback="document")
+        return await storage_response(
+            out_path,
+            f"{stem}_redacted.pdf",
+            "application/pdf",
+            user_id=user_id,
+        )
     except ValueError as exc:
         out_path.unlink(missing_ok=True)
         raise api_error(422, str(exc), "NO_MATCHES_FOUND")

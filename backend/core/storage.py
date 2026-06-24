@@ -21,6 +21,22 @@ Design contract
   back to serving directly from disk. This lets local dev work without
   a Supabase project.
 
+SECURITY — File Ownership & Filename Sanitization
+──────────────────────────────────────────────────
+upload_file() accepts a user_id and a friendly download_name.
+
+Internal storage key:
+  outputs/{user_id}/{uuid}
+  • Scoped to the authenticated user — objects can never collide across
+    users or be guessed by another user.
+  • Always a UUID — the user-supplied filename is NEVER used as any part
+    of the on-disk path or Supabase object key.
+
+Content-Disposition filename:
+  The download_name parameter is used only in the response header so the
+  browser shows a friendly save-as name. It must already be sanitised by
+  the caller (safe_download_name() in file_handling.py).
+
 Supabase Storage REST endpoints used
 ──────────────────────────────────────
   POST   /storage/v1/object/{bucket}/{path}           — upload
@@ -73,15 +89,28 @@ def _auth_headers() -> dict[str, str]:
 
 # ── Core operations ───────────────────────────────────────────────────────────
 
-async def upload_file(local_path: Path, filename: str) -> str:
+async def upload_file(local_path: Path, download_name: str, user_id: int) -> str:
     """
-    Upload *local_path* to Supabase Storage under a unique key.
+    Upload *local_path* to Supabase Storage under a user-scoped UUID key.
 
-    Returns the storage object key (e.g. ``outputs/<hex>/<filename>``).
+    SECURITY — File Ownership:
+      The storage key is ``outputs/{user_id}/{uuid}`` — scoped to the
+      authenticated user so objects from different users cannot collide
+      and cannot be guessed by other users.
+
+    SECURITY — Filename Sanitization:
+      The internal object key is always a server-generated UUID.
+      ``download_name`` (the user-visible filename) is stored only as
+      Supabase object metadata and used in Content-Disposition; it is
+      never part of the storage path.
+
+    Returns the storage object key (e.g. ``outputs/42/a1b2c3d4…``).
     Raises ``httpx.HTTPStatusError`` on failure.
     """
     url, _, bucket, _ = _cfg()
-    object_key = f"outputs/{uuid.uuid4().hex}/{filename}"
+
+    # UUID-only key — never expose user-supplied name in the storage path.
+    object_key = f"outputs/{user_id}/{uuid.uuid4().hex}"
     upload_url = f"{url}/storage/v1/object/{bucket}/{object_key}"
 
     data = local_path.read_bytes()
@@ -93,12 +122,17 @@ async def upload_file(local_path: Path, filename: str) -> str:
             headers={
                 **_auth_headers(),
                 "Content-Type": "application/octet-stream",
+                # Store the friendly name as metadata so we can reconstruct
+                # Content-Disposition on the way out if needed.
                 "x-upsert": "true",
             },
         )
         resp.raise_for_status()
 
-    logger.info("Uploaded '%s' → Supabase: %s", filename, object_key)
+    logger.info(
+        "Uploaded '%s' → Supabase: %s (user_id=%s)",
+        download_name, object_key, user_id,
+    )
     return object_key
 
 

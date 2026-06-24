@@ -175,14 +175,24 @@ def send_verification_email(email: str, token: str):
         logger.error(f"Failed to send verification email to {email}: {e}")
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Token helpers ─────────────────────────────────────────────────────────────
 
-def create_token(email: str) -> str:
-    payload = {"sub": email, "exp": time.time() + TOKEN_EXPIRE_SECONDS}
+def create_token(email: str, user_id: int) -> str:
+    """
+    Create a JWT embedding both the user's email (sub) and numeric DB id (uid).
+    The uid is used by get_current_user_id() to enforce file ownership without
+    an extra DB round-trip on every request.
+    """
+    payload = {
+        "sub": email,
+        "uid": user_id,
+        "exp": time.time() + TOKEN_EXPIRE_SECONDS,
+    }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
+    """Return the authenticated user's email, or raise 401."""
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
@@ -192,10 +202,38 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int:
+    """
+    Return the authenticated user's numeric DB id, or raise 401.
+
+    SECURITY — File Ownership: every tool endpoint depends on this function.
+    The returned id is passed into storage.upload_file() so that Supabase
+    objects are namespaced under outputs/{user_id}/… and can never be
+    served or deleted by a request that belongs to a different user.
+    """
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        uid = payload.get("uid")
+        if uid is None:
+            # Tokens issued before this field was added — force re-login.
+            raise HTTPException(
+                status_code=401,
+                detail="Token is outdated. Please log in again.",
+            )
+        return int(uid)
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
 def _get_user_row(cur, email):
-    """Returns RealDictRow for the given email, including lockout fields."""
+    """
+    Returns RealDictRow for the given email, including id and lockout fields.
+    The 'id' column is required so we can embed the numeric user id in the JWT.
+    """
     cur.execute(
-        """SELECT password_hash, provider, is_verified,
+        """SELECT id, password_hash, provider, is_verified,
                   failed_login_count, locked_until
            FROM users WHERE email = %s""",
         (email,)
@@ -240,10 +278,12 @@ def signup(request: Request, data: SignupRequest):
                 """INSERT INTO users
                    (email, password_hash, provider, created_at, is_verified,
                     verification_token, verification_expires_at)
-                   VALUES (%s, %s, 'local', %s, %s, %s, %s)""",
+                   VALUES (%s, %s, 'local', %s, %s, %s, %s)
+                   RETURNING id""",
                 (data.email, password_hash, time.time(), is_verified,
                  verification_token, verification_expires_at),
             )
+            new_user_id = cur.fetchone()["id"]
         conn.commit()
     finally:
         conn.close()
@@ -252,7 +292,7 @@ def signup(request: Request, data: SignupRequest):
         send_verification_email(data.email, verification_token)
         return {"message": "Account created! Check your email to verify your account."}
 
-    token = create_token(data.email)
+    token = create_token(data.email, new_user_id)
     return {"access_token": token, "token_type": "bearer", "email": data.email}
 
 
@@ -385,6 +425,7 @@ def login(request: Request, data: LoginRequest):
                     detail="Please verify your email before logging in.",
                 )
 
+            user_id = row["id"]
             cur.execute(
                 "UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE email = %s",
                 (data.email,),
@@ -394,7 +435,7 @@ def login(request: Request, data: LoginRequest):
     finally:
         conn.close()
 
-    token = create_token(data.email)
+    token = create_token(data.email, user_id)
     return {"access_token": token, "token_type": "bearer", "email": data.email}
 
 
@@ -418,17 +459,22 @@ def google_login(request: Request, data: GoogleLoginRequest):
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            if not _get_user_row(cur, email):
+            existing = _get_user_row(cur, email)
+            if not existing:
                 cur.execute(
                     """INSERT INTO users (email, password_hash, provider, created_at, is_verified)
-                       VALUES (%s, NULL, 'google', %s, TRUE)""",
+                       VALUES (%s, NULL, 'google', %s, TRUE)
+                       RETURNING id""",
                     (email, time.time()),
                 )
+                user_id = cur.fetchone()["id"]
+            else:
+                user_id = existing["id"]
         conn.commit()
     finally:
         conn.close()
 
-    token = create_token(email)
+    token = create_token(email, user_id)
     return {"access_token": token, "token_type": "bearer", "email": email}
 
 

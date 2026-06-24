@@ -12,14 +12,32 @@ Phase 2 additions (stubs below, uncomment when services are ready):
   POST /tools/jpg           PDF → ZIP of JPEGs
   POST /tools/png           PDF → ZIP of PNGs
   POST /tools/extract-images PDF embedded images → ZIP
+
+SECURITY
+  • File Ownership:   Every endpoint requires a valid JWT via
+    get_current_user_id(). The returned user_id is passed into
+    storage_response() so that all Supabase objects are namespaced under
+    outputs/{user_id}/… and can never be accessed by another user.
+  • Filename Sanitization: safe_download_name() strips unsafe characters
+    from user-supplied filenames before they appear in Content-Disposition
+    headers. The internal storage key is always a UUID.
+  • MIME Validation: read_and_validate(kind="pdf") checks the %PDF magic
+    bytes in addition to the file extension.
 """
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 
+from auth import get_current_user_id
 from core.config import DEFAULT_RATE_LIMIT, HEAVY_RATE_LIMIT, GEMINI_API_KEY
-from core.file_handling import read_and_validate, temp_path, api_error, storage_response
+from core.file_handling import (
+    read_and_validate,
+    temp_path,
+    api_error,
+    storage_response,
+    safe_download_name,
+)
 from core.rate_limit import limiter
 
 from services.pdf_to_word import convert_pdf_to_word
@@ -33,26 +51,31 @@ router = APIRouter()
 # ── PDF → Word ────────────────────────────────────────────────────────────────
 @router.post("/word")
 @limiter.limit(DEFAULT_RATE_LIMIT)
-async def pdf_to_word(request: Request, file: UploadFile = File(...)):
+async def pdf_to_word(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+):
     """Convert a PDF to an editable Word document (.docx)."""
-    content  = await read_and_validate(file, kind="pdf")
+    content   = await read_and_validate(file, kind="pdf")
     pdf_path  = temp_path("pdf")
     docx_path = temp_path("docx")
 
     try:
         pdf_path.write_bytes(content)
-        logger.info("PDF→DOCX: %s (%d bytes)", file.filename, len(content))
+        logger.info("PDF→DOCX: %s (%d bytes) user_id=%s", file.filename, len(content), user_id)
 
         await convert_pdf_to_word(pdf_path, docx_path)
 
         if not docx_path.exists() or docx_path.stat().st_size == 0:
             raise api_error(500, "Conversion produced an empty file.", "EMPTY_OUTPUT")
 
-        stem = Path(file.filename or "output").stem
+        stem = safe_download_name(file.filename or "", fallback="output")
         return await storage_response(
             docx_path,
             f"{stem}.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            user_id=user_id,
         )
     except Exception as exc:
         docx_path.unlink(missing_ok=True)
@@ -67,7 +90,11 @@ async def pdf_to_word(request: Request, file: UploadFile = File(...)):
 # ── PDF → Excel ───────────────────────────────────────────────────────────────
 @router.post("/excel")
 @limiter.limit(DEFAULT_RATE_LIMIT)
-async def pdf_to_excel(request: Request, file: UploadFile = File(...)):
+async def pdf_to_excel(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+):
     """Extract tables from a PDF and place them in an Excel workbook (.xlsx)."""
     content   = await read_and_validate(file, kind="pdf")
     pdf_path  = temp_path("pdf")
@@ -75,15 +102,16 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...)):
 
     try:
         pdf_path.write_bytes(content)
-        logger.info("PDF→XLSX: %s (%d bytes)", file.filename, len(content))
+        logger.info("PDF→XLSX: %s (%d bytes) user_id=%s", file.filename, len(content), user_id)
 
         await convert_pdf_to_excel(pdf_path, xlsx_path)
 
-        stem = Path(file.filename or "output").stem
+        stem = safe_download_name(file.filename or "", fallback="output")
         return await storage_response(
             xlsx_path,
             f"{stem}.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            user_id=user_id,
         )
     except Exception as exc:
         xlsx_path.unlink(missing_ok=True)
@@ -98,7 +126,11 @@ async def pdf_to_excel(request: Request, file: UploadFile = File(...)):
 # ── UPI Tracker (AI-powered) ──────────────────────────────────────────────────
 @router.post("/upi-tracker")
 @limiter.limit(HEAVY_RATE_LIMIT)
-async def upi_tracker(request: Request, file: UploadFile = File(...)):
+async def upi_tracker(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: int = Depends(get_current_user_id),
+):
     """
     Parse a bank statement PDF and produce a categorised UPI spending Excel.
     Requires the GEMINI_API_KEY environment variable to be set.
@@ -112,15 +144,16 @@ async def upi_tracker(request: Request, file: UploadFile = File(...)):
 
     try:
         pdf_path.write_bytes(content)
-        logger.info("UPI Tracker: %s (%d bytes)", file.filename, len(content))
+        logger.info("UPI Tracker: %s (%d bytes) user_id=%s", file.filename, len(content), user_id)
 
         await run_upi_tracker(pdf_path, xlsx_path, content, GEMINI_API_KEY)
 
-        stem = Path(file.filename or "statement").stem
+        stem = safe_download_name(file.filename or "", fallback="statement")
         return await storage_response(
             xlsx_path,
             f"{stem}_upi_spending.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            user_id=user_id,
         )
     except Exception as exc:
         xlsx_path.unlink(missing_ok=True)
