@@ -40,6 +40,7 @@ Rate limits (all per IP via slowapi):
 
 import os
 import math
+import re
 import secrets
 import time
 import logging
@@ -48,7 +49,7 @@ import httpx
 import jwt
 import psycopg2
 import psycopg2.extras
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordBearer
 from google.auth.transport import requests as google_requests
@@ -69,6 +70,7 @@ SECRET_KEY: str = os.environ["JWT_SECRET"]
 ALGORITHM                   = "HS256"
 TOKEN_EXPIRE_SECONDS        = 60 * 60 * 24 * 7  # 7 days
 VERIFICATION_EXPIRE_SECONDS = 60 * 60 * 24      # 24 hours
+RESET_EXPIRE_SECONDS        = 60 * 60            # 1 hour
 
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 DATABASE_URL     = os.environ.get("DATABASE_URL", "")
@@ -85,9 +87,11 @@ MAX_LOGIN_ATTEMPTS = int(os.environ.get("MAX_LOGIN_ATTEMPTS", "5"))
 LOCKOUT_SECONDS    = int(os.environ.get("LOCKOUT_SECONDS", str(15 * 60)))  # 15 minutes
 
 # ── Rate limit strings ────────────────────────────────────────────────────────
-LOGIN_RATE_LIMIT  = os.environ.get("LOGIN_RATE_LIMIT",  "5/15 minutes")
-SIGNUP_RATE_LIMIT = os.environ.get("SIGNUP_RATE_LIMIT", "5/15 minutes")
-GOOGLE_RATE_LIMIT = os.environ.get("GOOGLE_RATE_LIMIT", "10/minute")
+LOGIN_RATE_LIMIT   = os.environ.get("LOGIN_RATE_LIMIT",  "5/15 minutes")
+SIGNUP_RATE_LIMIT  = os.environ.get("SIGNUP_RATE_LIMIT", "5/15 minutes")
+GOOGLE_RATE_LIMIT  = os.environ.get("GOOGLE_RATE_LIMIT", "10/minute")
+FORGOT_RATE_LIMIT  = os.environ.get("FORGOT_RATE_LIMIT", "3/hour")
+RESET_RATE_LIMIT   = os.environ.get("RESET_RATE_LIMIT",  "5/hour")
 
 pwd_context   = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
@@ -123,6 +127,9 @@ def init_db():
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at DOUBLE PRECISION",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until DOUBLE PRECISION",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_expires_at DOUBLE PRECISION",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at DOUBLE PRECISION",
         ]:
             cur.execute(ddl)
     conn.commit()
@@ -175,31 +182,93 @@ def send_verification_email(email: str, token: str):
         logger.error(f"Failed to send verification email to {email}: {e}")
 
 
-# ── Token helpers ─────────────────────────────────────────────────────────────
+def send_reset_email(email: str, token: str):
+    """Send a password reset link via Resend."""
+    if not RESEND_API_KEY:
+        logger.warning("RESEND_API_KEY not set — skipping reset email")
+        return
+
+    reset_url = f"{APP_URL}/reset-password?token={token}"
+
+    try:
+        resp = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}"},
+            json={
+                "from": FROM_EMAIL,
+                "to": email,
+                "subject": "Reset your DocShift password",
+                "html": f"""
+                <div style="font-family:sans-serif;max-width:480px;margin:auto">
+                  <h2 style="color:#6366f1">Reset your password</h2>
+                  <p>We received a request to reset the password for your DocShift account.</p>
+                  <a href="{reset_url}"
+                     style="display:inline-block;padding:12px 24px;background:#6366f1;
+                            color:#fff;border-radius:8px;text-decoration:none;font-weight:700">
+                    Reset my password
+                  </a>
+                  <p style="color:#888;font-size:13px;margin-top:24px">
+                    This link expires in 1 hour. If you didn't request a password reset, you can safely ignore this email.
+                  </p>
+                </div>
+                """,
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            logger.error(f"Resend API error {resp.status_code}: {resp.text}")
+        else:
+            logger.info(f"Password reset email sent to {email}")
+    except Exception as e:
+        logger.error(f"Failed to send reset email to {email}: {e}")
+
+
+
 
 def create_token(email: str, user_id: int) -> str:
     """
-    Create a JWT embedding both the user's email (sub) and numeric DB id (uid).
-    The uid is used by get_current_user_id() to enforce file ownership without
-    an extra DB round-trip on every request.
+    Create a JWT embedding the user's email (sub), numeric DB id (uid),
+    and issued-at time (iat). iat is checked against password_changed_at
+    so that tokens issued before a password reset are automatically rejected.
     """
+    now = int(time.time())
     payload = {
         "sub": email,
         "uid": user_id,
-        "exp": time.time() + TOKEN_EXPIRE_SECONDS,
+        "iat": now,
+        "exp": now + TOKEN_EXPIRE_SECONDS,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
 def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
-    """Return the authenticated user's email, or raise 401."""
+    """Return the authenticated user's email, or raise 401.
+    Also rejects tokens that were issued before the user last reset their password.
+    """
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload["sub"]
+        email   = payload["sub"]
+        iat     = payload.get("iat", 0)
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Fix #3 — invalidate pre-reset sessions
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT password_changed_at FROM users WHERE email = %s", (email,))
+            row = cur.fetchone()
+        if row and row["password_changed_at"] and iat < row["password_changed_at"]:
+            raise HTTPException(
+                status_code=401,
+                detail="Session expired after a password reset. Please log in again.",
+            )
+    finally:
+        conn.close()
+
+    return email
 
 
 def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int:
@@ -210,21 +279,39 @@ def get_current_user_id(token: str = Depends(oauth2_scheme)) -> int:
     The returned id is passed into storage.upload_file() so that Supabase
     objects are namespaced under outputs/{user_id}/… and can never be
     served or deleted by a request that belongs to a different user.
+
+    Also rejects tokens issued before a password reset (same check as get_current_user).
     """
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        uid = payload.get("uid")
+        uid  = payload.get("uid")
+        iat  = payload.get("iat", 0)
+        email = payload.get("sub")
         if uid is None:
-            # Tokens issued before this field was added — force re-login.
             raise HTTPException(
                 status_code=401,
                 detail="Token is outdated. Please log in again.",
             )
-        return int(uid)
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Fix #3 — invalidate pre-reset sessions
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT password_changed_at FROM users WHERE email = %s", (email,))
+            row = cur.fetchone()
+        if row and row["password_changed_at"] and iat < row["password_changed_at"]:
+            raise HTTPException(
+                status_code=401,
+                detail="Session expired after a password reset. Please log in again.",
+            )
+    finally:
+        conn.close()
+
+    return int(uid)
 
 
 def _get_user_row(cur, email):
@@ -259,9 +346,17 @@ class GoogleLoginRequest(BaseModel):
 
 @router.post("/signup")
 @limiter.limit(SIGNUP_RATE_LIMIT)
-def signup(request: Request, data: SignupRequest):
-    if len(data.password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+def signup(request: Request, data: SignupRequest, background_tasks: BackgroundTasks):
+    if len(data.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not re.search(r'[A-Z]', data.password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not re.search(r'[a-z]', data.password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one lowercase letter")
+    if not re.search(r'\d', data.password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+    if not re.search(r'[!@#$%^&*(),.?\":{}|<>_\-+=\[\]\\\/`~;\'@£]', data.password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one special character")
 
     conn = get_conn()
     try:
@@ -289,7 +384,7 @@ def signup(request: Request, data: SignupRequest):
         conn.close()
 
     if RESEND_API_KEY:
-        send_verification_email(data.email, verification_token)
+        background_tasks.add_task(send_verification_email, data.email, verification_token)
         return {"message": "Account created! Check your email to verify your account."}
 
     token = create_token(data.email, new_user_id)
@@ -481,3 +576,111 @@ def google_login(request: Request, data: GoogleLoginRequest):
 @router.get("/me")
 def me(current_user: str = Depends(get_current_user)):
     return {"email": current_user}
+
+
+# ── Forgot / Reset password ───────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password")
+@limiter.limit(FORGOT_RATE_LIMIT)
+def forgot_password(request: Request, data: ForgotPasswordRequest, background_tasks: BackgroundTasks):
+    """
+    Always returns 200 with a generic message to prevent user enumeration.
+    Email is sent in the background so response time doesn't reveal
+    whether the email exists (fix for timing oracle).
+    Only sends an email if the account exists and uses local auth (not Google).
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, provider FROM users WHERE email = %s",
+                (data.email,)
+            )
+            row = cur.fetchone()
+
+            if row and row["provider"] == "local":
+                reset_token      = secrets.token_urlsafe(32)
+                reset_expires_at = time.time() + RESET_EXPIRE_SECONDS
+                cur.execute(
+                    """UPDATE users
+                       SET reset_token = %s, reset_expires_at = %s
+                       WHERE email = %s""",
+                    (reset_token, reset_expires_at, data.email),
+                )
+                conn.commit()
+                # Fix #2 & #4 — send in background so response time is constant
+                # and the request thread isn't blocked by the Resend API call
+                background_tasks.add_task(send_reset_email, data.email, reset_token)
+    finally:
+        conn.close()
+
+    return {"message": "If an account with that email exists, a reset link has been sent."}
+
+
+@router.post("/reset-password")
+@limiter.limit(RESET_RATE_LIMIT)
+def reset_password(request: Request, data: ResetPasswordRequest):
+    # Validate new password strength server-side (mirrors signup rules)
+    if len(data.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not re.search(r'[A-Z]', data.new_password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not re.search(r'[a-z]', data.new_password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one lowercase letter")
+    if not re.search(r'\d', data.new_password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+    if not re.search(r'[!@#$%^&*(),.?\":{}|<>_\-+=\[\]\\\/`~;\'@£]', data.new_password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one special character")
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            # Fix #1 — SELECT FOR UPDATE locks the row so two simultaneous requests
+            # with the same token can't both pass the validity check (TOCTOU fix)
+            cur.execute(
+                """SELECT email, reset_expires_at
+                   FROM users
+                   WHERE reset_token = %s
+                   FOR UPDATE""",
+                (data.token,)
+            )
+            row = cur.fetchone()
+
+            if not row:
+                raise HTTPException(status_code=400, detail="Invalid or already used reset link.")
+
+            if time.time() > row["reset_expires_at"]:
+                cur.execute(
+                    "UPDATE users SET reset_token = NULL, reset_expires_at = NULL WHERE reset_token = %s",
+                    (data.token,)
+                )
+                conn.commit()
+                raise HTTPException(status_code=410, detail="Reset link has expired. Please request a new one.")
+
+            new_hash = pwd_context.hash(data.new_password[:72])
+            now      = time.time()
+            cur.execute(
+                """UPDATE users
+                   SET password_hash       = %s,
+                       password_changed_at = %s,
+                       reset_token         = NULL,
+                       reset_expires_at    = NULL,
+                       failed_login_count  = 0,
+                       locked_until        = NULL
+                   WHERE reset_token = %s""",
+                (new_hash, now, data.token),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"message": "Password updated successfully. You can now log in."}

@@ -10,13 +10,15 @@ import ToolPage from './pages/ToolPage';
 import HistoryPage from './pages/HistoryPage';
 import SettingsPage from './pages/SettingsPage';
 import Login from './pages/Login';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 
 export default function App() {
   return (
     <ThemeProvider>
       <Routes>
         {/* Standalone — no TopBar/Sidebar chrome */}
-        <Route path="/login" element={<Login />} />
+        <Route path="/login"          element={<Login />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         <Route element={<AppShell />}>
           <Route path="/" element={<Home />} />
