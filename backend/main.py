@@ -175,6 +175,34 @@ async def global_exception_handler(request: Request, exc: Exception):
     return response
 
 
+# 404 / 405 also bypass CORSMiddleware — without this, a missing or
+# wrong-method route looks like a CORS error in the browser console.
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: Exception):
+    response = JSONResponse(
+        status_code=404,
+        content={"error": "Not found.", "code": "NOT_FOUND"},
+    )
+    origin = request.headers.get("origin")
+    if origin and _origin_allowed(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+
+@app.exception_handler(405)
+async def method_not_allowed_handler(request: Request, exc: Exception):
+    response = JSONResponse(
+        status_code=405,
+        content={"error": "Method not allowed.", "code": "METHOD_NOT_ALLOWED"},
+    )
+    origin = request.headers.get("origin")
+    if origin and _origin_allowed(origin):
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
+
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(from_pdf_router, prefix="/tools", tags=["Convert from PDF"])
 app.include_router(organize_router, prefix="/tools", tags=["Organize PDF"])
