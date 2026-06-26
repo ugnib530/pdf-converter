@@ -684,3 +684,5 @@ def reset_password(request: Request, data: ResetPasswordRequest):
         conn.close()
 
     return {"message": "Password updated successfully. You can now log in."}
+
+# shing sing MEOW
