@@ -41,7 +41,7 @@ def _do_split(pdf_path: Path, zip_path: Path, ranges_str: str) -> int:
                 continue
             indices = parse_page_ranges(part, total_pages)
             if indices:
-                # Label: e.g. "pages_1-3" or "page_5"
+                # Label: e.g. "pages_1-3" or "page_5"fdgdfgdfgd
                 if len(indices) == 1:
                     label = f"page_{indices[0] + 1}"
                 else:
